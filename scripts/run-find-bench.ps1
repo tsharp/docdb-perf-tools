@@ -13,7 +13,7 @@ param(
 	[string]$Collection = "benchly_test",
 	[string[]]$Workers = @("8", "24", "48", "64", "128", "256"),
 	[int]$DocSize = 1024,
-	[int]$Duration = 30,
+	[int]$Duration = 300,
 	[int]$Warmup = 5,
 	[int]$PreloadCount = 250000,
 	[int]$FindLimit = 100,
