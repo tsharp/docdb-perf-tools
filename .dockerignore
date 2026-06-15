@@ -1,6 +1,8 @@
 # Ignore sensitive files
 passwords.txt
 passphrase.txt
+*.secret
+*.secret.*
 
 # Ignore logs and cache
 logs/
@@ -23,4 +25,5 @@ git
 # Ignore ISO images
 *.iso
 
+# Ignore Rust Artifacts
 target/
