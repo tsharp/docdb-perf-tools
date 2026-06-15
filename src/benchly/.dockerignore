@@ -1,0 +1,26 @@
+# Ignore sensitive files
+passwords.txt
+passphrase.txt
+
+# Ignore logs and cache
+logs/
+cache/
+bench-results/
+.env
+.env.*
+
+# Ignore Git repository
+git
+.git/
+.github/
+.vscode/
+.mimir/
+
+# Ignore markdown and compiled class files
+*.md
+**/*.class
+
+# Ignore ISO images
+*.iso
+
+target/
