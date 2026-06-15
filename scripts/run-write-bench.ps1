@@ -68,22 +68,22 @@ Write-Host "  Output dir:      $OutputDir"
 Write-Host ""
 
 $runIndex = 0
-foreach ($workers in $parsedWorkers) {
-	Write-Host "--- Running write benchmark with $workers workers using $Driver ---" -ForegroundColor Green
+foreach ($currentWorkers in $parsedWorkers) {
+	Write-Host "--- Running write benchmark with $currentWorkers workers using $Driver ---" -ForegroundColor Green
 
 	$runnerParams = @{
-		MongoDbUrlFile = $resolvedMongoDbUrlFile
-		Database = $Database
-		Collection = $Collection
-		Test = "write"
-		Workers = $workers
-		DocSize = $DocSize
-		BatchSize = $BatchSize
+		MongoDbUrlFile  = $resolvedMongoDbUrlFile
+		Database        = $Database
+		Collection      = $Collection
+		Test            = "write"
+		Workers         = $currentWorkers
+		DocSize         = $DocSize
+		BatchSize       = $BatchSize
 		MaxWritesPerSec = $MaxWritesPerSec
-		Duration = $Duration
-		Warmup = $Warmup
-		RunLabel = $RunLabel
-		OutputDir = $OutputDir
+		Duration        = $Duration
+		Warmup          = $Warmup
+		RunLabel        = $RunLabel
+		OutputDir       = $OutputDir
 	}
 
 	if ($Driver -ne "benchly") {
@@ -114,7 +114,7 @@ foreach ($workers in $parsedWorkers) {
 	Write-Host ""
 
 	if ($runIndex -lt $parsedWorkers.Count -and $PauseSeconds -gt 0) {
-		Write-Host "  Completed $workers workers. Pausing ${PauseSeconds}s before next run..." -ForegroundColor Yellow
+		Write-Host "  Completed $currentWorkers workers. Pausing ${PauseSeconds}s before next run..." -ForegroundColor Yellow
 		Start-Sleep -Seconds $PauseSeconds
 	}
 }

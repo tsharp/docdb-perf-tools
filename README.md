@@ -71,6 +71,31 @@ make
 
 This builds `src/benchly/target/release/benchly`.
 
+## Docker
+
+Build the Docker image without running a benchmark:
+
+```bash
+./scripts/docker-build-run.sh --build-only
+```
+
+Build the image and run Benchly in a container. The helper mounts the secret file
+read-only and writes reports to `bench-results/` on the host:
+
+```bash
+./scripts/docker-build-run.sh \
+  --mongodb-url-file ./local.secret \
+  --test write \
+  --workers 8 \
+  --duration 120 \
+  --run-label docker_write_smoke
+```
+
+Use `--skip-build` to reuse an existing `benchly:local` image, `--output-dir` to
+choose a different host results directory, or `--dry-run` to preview the Docker
+commands. Arguments that are not Docker helper options are passed through to
+`benchly`.
+
 ## Run Benchmarks
 
 From the `scripts` directory, pass the secret file explicitly:

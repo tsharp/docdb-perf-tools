@@ -1,13 +1,13 @@
 use anyhow::Result;
 use hdrhistogram::Histogram;
 use mongodb::{
-    bson::{doc, Document},
     Database,
+    bson::{Document, doc},
 };
 use rand::Rng;
 use rand::{SeedableRng, rngs::SmallRng};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::Barrier;
 
@@ -79,7 +79,10 @@ pub async fn aggregator_task(
     match collection.aggregate(warmup_pipeline).await {
         Ok(_) => {}
         Err(e) => {
-            eprintln!("[Aggregator {}] warmup aggregation failed: {}", worker_id, e);
+            eprintln!(
+                "[Aggregator {}] warmup aggregation failed: {}",
+                worker_id, e
+            );
         }
     }
     warmup_barrier.wait().await;
@@ -90,7 +93,10 @@ pub async fn aggregator_task(
             collection = database.collection::<Document>(&collection_name);
             session_start = Instant::now();
             if worker_id == 0 {
-                println!("[Aggregator 0] Session recycled at {:?}", session_start.elapsed());
+                println!(
+                    "[Aggregator 0] Session recycled at {:?}",
+                    session_start.elapsed()
+                );
             }
         }
 
@@ -103,7 +109,7 @@ pub async fn aggregator_task(
                 while let Ok(true) = cursor.advance().await {
                     // Processing results
                 }
-                
+
                 let latency_ms = start.elapsed().as_millis() as u64;
                 if stats.is_recording() {
                     let _ = local_hist.record(latency_ms);
@@ -137,14 +143,12 @@ fn build_pipeline(
             vec![doc! { "$count": "total" }]
         }
         AggregationType::GroupByCount => {
-            vec![
-                doc! {
-                    "$group": {
-                        "_id": "$indexed_field",
-                        "count": { "$sum": 1 }
-                    }
+            vec![doc! {
+                "$group": {
+                    "_id": "$indexed_field",
+                    "count": { "$sum": 1 }
                 }
-            ]
+            }]
         }
         AggregationType::MatchRangeCount => {
             // Random range of ~10% of total documents
@@ -152,7 +156,7 @@ fn build_pipeline(
             let max_start = preload_count.saturating_sub(range_size);
             let start = rng.gen_range(0..=max_start);
             let end = start + range_size;
-            
+
             vec![
                 doc! {
                     "$match": {
@@ -162,26 +166,24 @@ fn build_pipeline(
                         }
                     }
                 },
-                doc! { "$count": "total" }
+                doc! { "$count": "total" },
             ]
         }
         AggregationType::GroupByModSum => {
             // Group by indexed_field mod 100 and sum
-            vec![
-                doc! {
-                    "$group": {
-                        "_id": { "$mod": ["$indexed_field", 100] },
-                        "total": { "$sum": "$indexed_field" },
-                        "count": { "$sum": 1 }
-                    }
+            vec![doc! {
+                "$group": {
+                    "_id": { "$mod": ["$indexed_field", 100] },
+                    "total": { "$sum": "$indexed_field" },
+                    "count": { "$sum": 1 }
                 }
-            ]
+            }]
         }
         AggregationType::SortLimit => {
             let limit = rng.gen_range(10..=100);
             vec![
                 doc! { "$sort": { "indexed_field": 1 } },
-                doc! { "$limit": limit }
+                doc! { "$limit": limit },
             ]
         }
         AggregationType::MatchGroupSort => {
@@ -190,7 +192,7 @@ fn build_pipeline(
             let max_start = preload_count.saturating_sub(range_size);
             let start = rng.gen_range(0..=max_start);
             let end = start + range_size;
-            
+
             vec![
                 doc! {
                     "$match": {
@@ -208,7 +210,7 @@ fn build_pipeline(
                     }
                 },
                 doc! { "$sort": { "count": -1 } },
-                doc! { "$limit": 10 }
+                doc! { "$limit": 10 },
             ]
         }
     }

@@ -1,13 +1,13 @@
 use anyhow::Result;
 use hdrhistogram::Histogram;
 use mongodb::{
-    bson::{doc, Document},
     Collection,
+    bson::{Document, doc},
 };
 use rand::seq::SliceRandom;
 use rand::{SeedableRng, rngs::SmallRng};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 use tokio::sync::Barrier;
 
@@ -26,7 +26,7 @@ pub async fn reader_task(
     let mut local_hist = Histogram::<u64>::new(3).unwrap();
     // Use SmallRng which is Send-safe, seeded with worker_id for reproducibility
     let mut rng = SmallRng::seed_from_u64(worker_id as u64);
-    
+
     // Clone ID batch for random selection
     let ids = id_batch.clone();
 

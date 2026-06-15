@@ -109,8 +109,13 @@ impl Args {
         }
 
         if let Some(path) = self.mongodb_url_file.as_deref() {
-            let mongodb_url = fs::read_to_string(path)
-                .map_err(|error| anyhow::anyhow!("Failed to read MongoDB connection string file {}: {}", path, error))?;
+            let mongodb_url = fs::read_to_string(path).map_err(|error| {
+                anyhow::anyhow!(
+                    "Failed to read MongoDB connection string file {}: {}",
+                    path,
+                    error
+                )
+            })?;
             let mongodb_url = mongodb_url.trim();
             if !mongodb_url.is_empty() {
                 return Ok(mongodb_url.to_string());
@@ -132,7 +137,9 @@ impl Args {
             }
         }
 
-        anyhow::bail!("Provide --mongodb-url, --mongodb-url-file, BENCHLY_MONGODB_URL, or MONGODB_URL");
+        anyhow::bail!(
+            "Provide --mongodb-url, --mongodb-url-file, BENCHLY_MONGODB_URL, or MONGODB_URL"
+        );
     }
 
     pub fn parsed_metadata_properties(&self) -> anyhow::Result<BTreeMap<String, String>> {

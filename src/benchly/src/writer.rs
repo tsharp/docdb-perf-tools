@@ -1,11 +1,11 @@
 use anyhow::Result;
 use hdrhistogram::Histogram;
 use mongodb::{
-    bson::{rawdoc, RawDocumentBuf},
     Collection,
+    bson::{RawDocumentBuf, rawdoc},
 };
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::Barrier;
 
@@ -16,23 +16,23 @@ static GLOBAL_DOC_COUNTER: AtomicU64 = AtomicU64::new(0);
 pub fn make_raw_document(size: usize, indexed: bool) -> RawDocumentBuf {
     let counter = GLOBAL_DOC_COUNTER.fetch_add(1, Ordering::Relaxed);
     let id = format!("doc_{:012}", counter);
-    
+
     if indexed {
         // With indexed field
         let padding_size = size.saturating_sub(100); // Account for _id and indexed_field
         let padding = "x".repeat(padding_size);
-        rawdoc! { 
+        rawdoc! {
             "_id": id,
             "indexed_field": counter as i64,
-            "payload": padding 
+            "payload": padding
         }
     } else {
         // Non-indexed, just _id and payload
         let padding_size = size.saturating_sub(60); // Account for _id field
         let padding = "x".repeat(padding_size);
-        rawdoc! { 
+        rawdoc! {
             "_id": id,
-            "payload": padding 
+            "payload": padding
         }
     }
 }
@@ -78,7 +78,7 @@ pub async fn writer_task(
                 .map(|_| make_raw_document(doc_size, indexed))
                 .collect();
             let doc_refs: Vec<&RawDocumentBuf> = docs.iter().collect();
-            
+
             match collection.insert_many(doc_refs).await {
                 Ok(_) => {
                     let latency_ms = start.elapsed().as_millis() as u64;

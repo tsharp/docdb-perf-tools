@@ -1,14 +1,14 @@
 use anyhow::Result;
 use hdrhistogram::Histogram;
 use mongodb::{
-    bson::{doc, Document},
-    options::{FindOneAndUpdateOptions, ReturnDocument},
     Database,
+    bson::{Document, doc},
+    options::{FindOneAndUpdateOptions, ReturnDocument},
 };
 use rand::seq::SliceRandom;
 use rand::{Rng, SeedableRng, rngs::SmallRng};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::Barrier;
 
@@ -64,7 +64,7 @@ pub async fn updater_task(
 ) -> Result<Histogram<u64>> {
     let mut local_hist = Histogram::<u64>::new(3).unwrap();
     let mut rng = SmallRng::seed_from_u64(worker_id as u64);
-    
+
     let ids = id_batch.clone();
 
     // Initial collection reference
@@ -74,7 +74,10 @@ pub async fn updater_task(
     // Warmup: do one update to establish connection
     if let Some(id) = ids.first() {
         let update_doc = build_update(&update_type, &mut rng, worker_id);
-        match collection.find_one_and_update(doc! { "_id": id }, update_doc).await {
+        match collection
+            .find_one_and_update(doc! { "_id": id }, update_doc)
+            .await
+        {
             Ok(_) => {}
             Err(e) => {
                 eprintln!("[Updater {}] warmup update failed: {}", worker_id, e);
@@ -92,7 +95,10 @@ pub async fn updater_task(
             collection = database.collection::<Document>(&collection_name);
             session_start = Instant::now();
             if worker_id == 0 {
-                println!("[Updater 0] Session recycled at {:?}", session_start.elapsed());
+                println!(
+                    "[Updater 0] Session recycled at {:?}",
+                    session_start.elapsed()
+                );
             }
         }
 
@@ -101,7 +107,11 @@ pub async fn updater_task(
             let update_doc = build_update(&update_type, &mut rng, worker_id);
             let start = Instant::now();
 
-            match collection.find_one_and_update(doc! { "_id": id }, update_doc).with_options(options.clone()).await {
+            match collection
+                .find_one_and_update(doc! { "_id": id }, update_doc)
+                .with_options(options.clone())
+                .await
+            {
                 Ok(_) => {
                     let latency_ms = start.elapsed().as_millis() as u64;
                     if stats.is_recording() {
@@ -127,13 +137,9 @@ pub async fn updater_task(
     Ok(local_hist)
 }
 
-fn build_update(
-    update_type: &UpdateType,
-    rng: &mut SmallRng,
-    worker_id: usize,
-) -> Document {
+fn build_update(update_type: &UpdateType, rng: &mut SmallRng, worker_id: usize) -> Document {
     let counter = GLOBAL_UPDATE_COUNTER.fetch_add(1, Ordering::Relaxed);
-    
+
     match update_type {
         UpdateType::SetField => {
             // Simple field update

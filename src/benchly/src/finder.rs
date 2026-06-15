@@ -1,12 +1,12 @@
 use anyhow::Result;
 use hdrhistogram::Histogram;
 use mongodb::{
-    bson::{doc, Document},
-    options::FindOptions,
     Database,
+    bson::{Document, doc},
+    options::FindOptions,
 };
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 use tokio::sync::Barrier;
 

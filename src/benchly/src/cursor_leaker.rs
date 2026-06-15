@@ -1,12 +1,8 @@
 use anyhow::Result;
 use hdrhistogram::Histogram;
-use mongodb::{
-    bson::doc,
-    options::FindOptions,
-    Database,
-};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use mongodb::{Database, bson::doc, options::FindOptions};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;
 use tokio::sync::Barrier;
 
@@ -28,34 +24,37 @@ pub async fn cursor_leaker_task(
 ) -> Result<Histogram<u64>> {
     let mut local_hist = Histogram::<u64>::new(3).unwrap();
     let collection = database.collection::<mongodb::bson::Document>(&collection_name);
-    
+
     // Warmup: create one cursor to establish connection
-    let warmup_options = FindOptions::builder()
-        .batch_size(batch_size as u32)
-        .build();
-    
+    let warmup_options = FindOptions::builder().batch_size(batch_size as u32).build();
+
     match collection.find(doc! {}).with_options(warmup_options).await {
         Ok(_cursor) => {
             // Intentionally drop cursor without consuming
         }
         Err(e) => {
-            eprintln!("[Leaker {}] warmup cursor creation failed: {}", worker_id, e);
+            eprintln!(
+                "[Leaker {}] warmup cursor creation failed: {}",
+                worker_id, e
+            );
         }
     }
     warmup_barrier.wait().await;
 
-    let find_options = FindOptions::builder()
-        .batch_size(batch_size as u32)
-        .build();
+    let find_options = FindOptions::builder().batch_size(batch_size as u32).build();
 
     while running.load(Ordering::Relaxed) {
         let start = Instant::now();
 
-        match collection.find(doc! {}).with_options(find_options.clone()).await {
+        match collection
+            .find(doc! {})
+            .with_options(find_options.clone())
+            .await
+        {
             Ok(_cursor) => {
                 // Intentionally drop cursor without consuming - this is the leak!
                 let cursor_num = GLOBAL_CURSOR_COUNTER.fetch_add(1, Ordering::Relaxed);
-                
+
                 let latency_ms = start.elapsed().as_millis() as u64;
                 if stats.is_recording() {
                     let _ = local_hist.record(latency_ms);
@@ -64,7 +63,10 @@ pub async fn cursor_leaker_task(
 
                 // Log every 10000 cursors from worker 0 for visibility
                 if worker_id == 0 && cursor_num % 10000 == 0 {
-                    println!("[Leaker 0] Created {} cursors (leaked, not consumed)", cursor_num);
+                    println!(
+                        "[Leaker 0] Created {} cursors (leaked, not consumed)",
+                        cursor_num
+                    );
                 }
             }
             Err(e) => {

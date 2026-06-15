@@ -66,21 +66,21 @@ Write-Host "  Output dir:    $OutputDir"
 Write-Host ""
 
 $runIndex = 0
-foreach ($workers in $parsedWorkers) {
-	Write-Host "--- Running read benchmark with $workers workers using $Driver ---" -ForegroundColor Green
+foreach ($currentWorkers in $parsedWorkers) {
+	Write-Host "--- Running read benchmark with $currentWorkers workers using $Driver ---" -ForegroundColor Green
 
 	$runnerParams = @{
 		MongoDbUrlFile = $resolvedMongoDbUrlFile
-		Database = $Database
-		Collection = $Collection
-		Test = "read"
-		Workers = $workers
-		DocSize = $DocSize
-		Duration = $Duration
-		Warmup = $Warmup
-		PreloadCount = $PreloadCount
-		RunLabel = $RunLabel
-		OutputDir = $OutputDir
+		Database       = $Database
+		Collection     = $Collection
+		Test           = "read"
+		Workers        = $currentWorkers
+		DocSize        = $DocSize
+		Duration       = $Duration
+		Warmup         = $Warmup
+		PreloadCount   = $PreloadCount
+		RunLabel       = $RunLabel
+		OutputDir      = $OutputDir
 	}
 
 	if ($Driver -ne "benchly") {
@@ -99,7 +99,7 @@ foreach ($workers in $parsedWorkers) {
 		$runnerParams.SkipBuild = $true
 	}
 
- 	$metadataArgs = $RemainingArgs
+	$metadataArgs = $RemainingArgs
 
 	$runnerScript = if ($Driver -eq "benchly") { "$PSScriptRoot/run-benchly.ps1" } else { "$PSScriptRoot/run-jbenchly.ps1" }
 	& $runnerScript @runnerParams @metadataArgs
@@ -111,7 +111,7 @@ foreach ($workers in $parsedWorkers) {
 	Write-Host ""
 
 	if ($runIndex -lt $parsedWorkers.Count -and $PauseSeconds -gt 0) {
-		Write-Host "  Completed $workers workers. Pausing ${PauseSeconds}s before next run..." -ForegroundColor Yellow
+		Write-Host "  Completed $currentWorkers workers. Pausing ${PauseSeconds}s before next run..." -ForegroundColor Yellow
 		Start-Sleep -Seconds $PauseSeconds
 	}
 }

@@ -43,13 +43,17 @@ impl Stats {
     }
 
     pub fn record_op(&self, docs: u64) {
-        if !self.is_recording() { return; }
+        if !self.is_recording() {
+            return;
+        }
         self.op_count.fetch_add(1, Ordering::Relaxed);
         self.doc_count.fetch_add(docs, Ordering::Relaxed);
     }
 
     pub fn record_failure(&self) {
-        if !self.is_recording() { return; }
+        if !self.is_recording() {
+            return;
+        }
         self.failures.fetch_add(1, Ordering::Relaxed);
     }
 
@@ -72,7 +76,13 @@ impl Stats {
         }
     }
 
-    pub async fn generate_report(&self, hist: &Histogram<u64>, args: &Args, start_time_str: &str, end_time_str: &str) -> Report {
+    pub async fn generate_report(
+        &self,
+        hist: &Histogram<u64>,
+        args: &Args,
+        start_time_str: &str,
+        end_time_str: &str,
+    ) -> Report {
         let ops = self.op_count.load(Ordering::Relaxed);
         let docs = self.doc_count.load(Ordering::Relaxed);
         let fails = self.failures.load(Ordering::Relaxed);
@@ -120,9 +130,13 @@ impl Stats {
         let fails = self.failures.load(Ordering::Relaxed);
         let elapsed = self.elapsed().await;
 
-        println!("\n================================================================================");
+        println!(
+            "\n================================================================================"
+        );
         println!("BENCHLY - INSERT BENCHMARK SUMMARY");
-        println!("================================================================================");
+        println!(
+            "================================================================================"
+        );
         println!("  Duration:         {:.1}s", elapsed);
         println!("  Operations:       {}", ops);
         println!("  Documents:        {}", docs);
@@ -142,6 +156,8 @@ impl Stats {
             println!("  Max:              {} ms", hist.max());
         }
 
-        println!("================================================================================\n");
+        println!(
+            "================================================================================\n"
+        );
     }
 }
