@@ -66,7 +66,7 @@ pub struct Args {
     #[arg(long, default_value = "insert_bench")]
     pub run_label: String,
 
-    /// Test type: read, find, write, update, aggregate, or leak_cursor
+    /// Test type: read, find, write, update, aggregate, leak_cursor, or server_info
     #[arg(long, default_value = "write")]
     pub test: String,
 

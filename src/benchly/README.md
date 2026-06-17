@@ -4,7 +4,7 @@ A high-performance, Rust-based MongoDB benchmarking tool with support for multip
 
 ## Workload Types
 
-Benchly supports five main workload types:
+Benchly supports six main modes:
 
 ### 1. Write Workload (`--test write`)
 Tests write performance using `insert_one` or `insert_many` operations.
@@ -107,12 +107,32 @@ Tests update performance using `findOneAndUpdate` operations.
 
 ---
 
+### 6. Server Info (`--test server_info`)
+Prints general server metadata without running a benchmark workload.
+
+**Fields shown:**
+- Server version and git version
+- OpenSSL version
+- Minimum and maximum wire version
+- Maximum BSON object size and message size
+- Replica set hosts, set name, and primary
+- Logical session timeout
+
+**Quick Start:**
+```bash
+./target/release/benchly \
+  --test server_info \
+  --mongodb-url-file ../../secrets/m80.secret
+```
+
+---
+
 ## Common Parameters
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `--mongodb-url` | (required) | MongoDB connection string |
-| `--test` | `write` | Workload type: write, read, update, aggregate, leak_cursor |
+| `--test` | `write` | Workload type: write, read, find, update, aggregate, leak_cursor, server_info |
 | `--workers` | `8` | Number of concurrent workers |
 | `--duration` | `120` | Test duration in seconds |
 | `--warmup` | `5` | Warmup period before recording |

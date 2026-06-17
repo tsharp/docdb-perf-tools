@@ -9,7 +9,7 @@ use rand::seq::SliceRandom;
 use rand::{Rng, SeedableRng, rngs::SmallRng};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tokio::sync::Barrier;
 
 use crate::stats::Stats;
@@ -60,7 +60,6 @@ pub async fn updater_task(
     update_type: UpdateType,
     stop_on_failure: bool,
     warmup_barrier: Arc<Barrier>,
-    session_duration: Duration,
 ) -> Result<Histogram<u64>> {
     let mut local_hist = Histogram::<u64>::new(3).unwrap();
     let mut rng = SmallRng::seed_from_u64(worker_id as u64);
@@ -68,8 +67,7 @@ pub async fn updater_task(
     let ids = id_batch.clone();
 
     // Initial collection reference
-    let mut collection = database.collection::<Document>(&collection_name);
-    let mut session_start = Instant::now();
+    let collection = database.collection::<Document>(&collection_name);
 
     // Warmup: do one update to establish connection
     if let Some(id) = ids.first() {
@@ -90,18 +88,6 @@ pub async fn updater_task(
     options.return_document = Some(ReturnDocument::After);
 
     while running.load(Ordering::Relaxed) {
-        // Recreate collection reference every session_duration to cycle connections
-        if session_start.elapsed() >= session_duration {
-            collection = database.collection::<Document>(&collection_name);
-            session_start = Instant::now();
-            if worker_id == 0 {
-                println!(
-                    "[Updater 0] Session recycled at {:?}",
-                    session_start.elapsed()
-                );
-            }
-        }
-
         // Randomly select an ID from this worker's batch
         if let Some(id) = ids.choose(&mut rng) {
             let update_doc = build_update(&update_type, &mut rng, worker_id);

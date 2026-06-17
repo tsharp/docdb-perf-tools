@@ -8,7 +8,7 @@ use rand::Rng;
 use rand::{SeedableRng, rngs::SmallRng};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tokio::sync::Barrier;
 
 use crate::stats::Stats;
@@ -65,14 +65,12 @@ pub async fn aggregator_task(
     preload_count: usize,
     stop_on_failure: bool,
     warmup_barrier: Arc<Barrier>,
-    session_duration: Duration,
 ) -> Result<Histogram<u64>> {
     let mut local_hist = Histogram::<u64>::new(3).unwrap();
     let mut rng = SmallRng::seed_from_u64(worker_id as u64);
 
     // Initial collection reference
-    let mut collection = database.collection::<Document>(&collection_name);
-    let mut session_start = Instant::now();
+    let collection = database.collection::<Document>(&collection_name);
 
     // Warmup: run one aggregation to establish connection
     let warmup_pipeline = build_pipeline(&agg_type, &mut rng, preload_count);
@@ -88,18 +86,6 @@ pub async fn aggregator_task(
     warmup_barrier.wait().await;
 
     while running.load(Ordering::Relaxed) {
-        // Recreate collection reference every session_duration to cycle connections
-        if session_start.elapsed() >= session_duration {
-            collection = database.collection::<Document>(&collection_name);
-            session_start = Instant::now();
-            if worker_id == 0 {
-                println!(
-                    "[Aggregator 0] Session recycled at {:?}",
-                    session_start.elapsed()
-                );
-            }
-        }
-
         let pipeline = build_pipeline(&agg_type, &mut rng, preload_count);
         let start = Instant::now();
 

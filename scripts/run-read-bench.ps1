@@ -11,7 +11,7 @@ param(
 
 	[string]$Database = "benchmark_db",
 	[string]$Collection = "benchly_test",
-	[string[]]$Workers = @("8", "24", "48", "64", "128", "256"),
+	[string[]]$Workers = @("8", "16", "24", "48", "64", "128", "256"),
 	[int]$DocSize = 1024,
 	[int]$Duration = 300,
 	[int]$Warmup = 5,

@@ -16,9 +16,8 @@ param(
 	[int]$Duration = 300,
 	[int]$Warmup = 5,
 	[int]$PreloadCount = 250000,
-	[int]$FindLimit = 100,
-	[int]$CursorBatchSize = 101,
-	[string]$RunLabel = "find_bench_1kb",
+	[string]$UpdateType = "setfield",
+	[string]$RunLabel = "update_bench_1kb",
 	[string]$OutputDir = "$PSScriptRoot/../bench-results",
 	[int]$PauseSeconds = 15,
 	[switch]$Indexed,
@@ -53,40 +52,38 @@ if ($parsedWorkers.Count -eq 0) {
 	throw "At least one worker count is required."
 }
 
-Write-Host "=== Benchly Find Worker Sweep ===" -ForegroundColor Cyan
-Write-Host "  Driver:            $Driver"
-Write-Host "  Connection:        $resolvedMongoDbUrlFile"
-Write-Host "  Database:          $Database"
-Write-Host "  Collection:        $Collection"
-Write-Host "  Worker: 		     $($parsedWorkers -join ', ')"
-Write-Host "  Doc size:          $DocSize bytes"
-Write-Host "  Preload count:     $PreloadCount"
-Write-Host "  Find limit:        $FindLimit"
-Write-Host "  Cursor batch size: $CursorBatchSize"
-Write-Host "  Duration:          ${Duration}s"
-Write-Host "  Warmup:            ${Warmup}s"
-Write-Host "  Run label:         $RunLabel"
-Write-Host "  Output dir:        $OutputDir"
+Write-Host "=== Benchly Update Worker Sweep ===" -ForegroundColor Cyan
+Write-Host "  Driver:        $Driver"
+Write-Host "  Connection:    $resolvedMongoDbUrlFile"
+Write-Host "  Database:      $Database"
+Write-Host "  Collection:    $Collection"
+Write-Host "  Workers:       $($parsedWorkers -join ', ')"
+Write-Host "  Doc size:      $DocSize bytes"
+Write-Host "  Preload count: $PreloadCount"
+Write-Host "  Update type:   $UpdateType"
+Write-Host "  Duration:      ${Duration}s"
+Write-Host "  Warmup:        ${Warmup}s"
+Write-Host "  Run label:     $RunLabel"
+Write-Host "  Output dir:    $OutputDir"
 Write-Host ""
 
 $runIndex = 0
 foreach ($currentWorkers in $parsedWorkers) {
-	Write-Host "--- Running find benchmark with $currentWorkers workers using $Driver ---" -ForegroundColor Green
+	Write-Host "--- Running update benchmark with $currentWorkers workers using $Driver ---" -ForegroundColor Green
 
 	$runnerParams = @{
-		MongoDbUrlFile  = $resolvedMongoDbUrlFile
-		Database        = $Database
-		Collection      = $Collection
-		Test            = "find"
-		Workers         = $currentWorkers
-		DocSize         = $DocSize
-		Duration        = $Duration
-		Warmup          = $Warmup
-		PreloadCount    = $PreloadCount
-		FindLimit       = $FindLimit
-		CursorBatchSize = $CursorBatchSize
-		RunLabel        = $RunLabel
-		OutputDir       = $OutputDir
+		MongoDbUrlFile = $resolvedMongoDbUrlFile
+		Database       = $Database
+		Collection     = $Collection
+		Test           = "update"
+		Workers        = $currentWorkers
+		DocSize        = $DocSize
+		Duration       = $Duration
+		Warmup         = $Warmup
+		PreloadCount   = $PreloadCount
+		UpdateType     = $UpdateType
+		RunLabel       = $RunLabel
+		OutputDir      = $OutputDir
 	}
 
 	if ($Driver -ne "benchly") {
@@ -123,4 +120,4 @@ foreach ($currentWorkers in $parsedWorkers) {
 }
 
 Write-Host ""
-Write-Host "=== Find sweep complete ===" -ForegroundColor Cyan
+Write-Host "=== Update sweep complete ===" -ForegroundColor Cyan

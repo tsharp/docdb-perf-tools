@@ -8,7 +8,7 @@ param(
 
     [string]$Database = "benchmark_db",
     [string]$Collection = "benchly_test",
-    [ValidateSet("write", "read", "find", "update", "aggregate", "leak_cursor")]
+    [ValidateSet("write", "read", "find", "update", "aggregate", "leak_cursor", "server_info")]
     [string]$Test = "write",
     [int]$Workers = 8,
     [int]$DocSize = 1024,

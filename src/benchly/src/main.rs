@@ -101,9 +101,36 @@ async fn main() -> Result<()> {
         run_update_benchmark(args).await
     } else if test_type == "leak_cursor" {
         run_cursor_leak_benchmark(args).await
+    } else if test_type == "server_info" {
+        run_server_info(args).await
     } else {
         run_write_benchmark(args).await
     }
+}
+
+async fn run_server_info(args: Args) -> Result<()> {
+    println!("\n================================================================================");
+    println!("BENCHLY - SERVER INFO");
+    println!("================================================================================");
+
+    let client = create_client(&args).await?;
+    let admin_db = client.database("admin");
+
+    let hello = admin_db
+        .run_command(doc! { "hello": 1 })
+        .await
+        .context("Failed to run hello command")?;
+    let build_info = admin_db
+        .run_command(doc! { "buildInfo": 1 })
+        .await
+        .context("Failed to run buildInfo command")?;
+
+    println!("hello:");
+    println!("{}", serde_json::to_string_pretty(&hello).context("Failed to serialize hello response")?);
+    println!();
+    println!("buildInfo:");
+    println!("{}", serde_json::to_string_pretty(&build_info).context("Failed to serialize buildInfo response")?);
+    Ok(())
 }
 
 async fn run_find_benchmark(args: Args) -> Result<()> {
@@ -622,7 +649,6 @@ async fn run_aggregate_benchmark(args: Args) -> Result<()> {
         let stop_on_fail = args.stop_on_failure;
         let agg_type_clone = agg_type.clone();
         let preload = args.preload_count;
-        let session_duration = Duration::from_secs(5);
 
         let handle = tokio::spawn(async move {
             aggregator_task(
@@ -635,7 +661,6 @@ async fn run_aggregate_benchmark(args: Args) -> Result<()> {
                 preload,
                 stop_on_fail,
                 barrier_clone,
-                session_duration,
             )
             .await
         });
@@ -806,7 +831,6 @@ async fn run_update_benchmark(args: Args) -> Result<()> {
         let stop_on_fail = args.stop_on_failure;
         let id_batch = worker_id_batches[i].clone();
         let update_type_clone = update_type.clone();
-        let session_duration = Duration::from_secs(5);
 
         let handle = tokio::spawn(async move {
             updater_task(
@@ -819,7 +843,6 @@ async fn run_update_benchmark(args: Args) -> Result<()> {
                 update_type_clone,
                 stop_on_fail,
                 barrier_clone,
-                session_duration,
             )
             .await
         });

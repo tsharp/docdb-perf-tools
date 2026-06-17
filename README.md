@@ -2,7 +2,7 @@
 
 Utilities for running MongoDB-compatible DocumentDB performance benchmarks. The
 main workload runner is `benchly`, a Rust binary under `src/benchly`, with
-PowerShell wrapper scripts for common read, write, and find benchmark sweeps.
+PowerShell wrapper scripts for common read, write, find, and update benchmark sweeps.
 
 ## Recommended Setup
 
@@ -105,6 +105,7 @@ cd scripts
 ./run-read-bench.ps1 -MongoDbUrlFile ../local.secret
 ./run-write-bench.ps1 -MongoDbUrlFile ../local.secret
 ./run-find-bench.ps1 -MongoDbUrlFile ../local.secret
+./run-update-bench.ps1 -MongoDbUrlFile ../local.secret
 ```
 
 You can also run the wrappers from the repository root:
@@ -113,6 +114,7 @@ You can also run the wrappers from the repository root:
 ./scripts/run-read-bench.ps1 -MongoDbUrlFile ./local.secret
 ./scripts/run-write-bench.ps1 -MongoDbUrlFile ./local.secret
 ./scripts/run-find-bench.ps1 -MongoDbUrlFile ./local.secret
+./scripts/run-update-bench.ps1 -MongoDbUrlFile ./local.secret
 ```
 
 The default benchmark sweep runs each workload at `8, 24, 48, 64, 128, 256`
@@ -121,7 +123,7 @@ and a 15 second pause between worker counts.
 
 ## Common Parameters
 
-The read, write, and find wrappers share these parameters:
+The read, write, find, and update wrappers share these parameters:
 
 | Parameter | Default | Description |
 | --- | --- | --- |
@@ -137,8 +139,9 @@ The read, write, and find wrappers share these parameters:
 | `-SkipPreload` | Off | Reuses existing data and avoids dropping the collection. |
 | `-SkipBuild` | Off | Skips building the Rust binary in the wrapper script. Useful after `make`. |
 
-Read and find workloads also support `-PreloadCount`, which defaults to
-`250000`. Find workloads support `-FindLimit` and `-CursorBatchSize`. Write
+Read, find, and update workloads also support `-PreloadCount`, which defaults
+to `250000`. Update workloads support `-UpdateType`, which defaults to
+`setfield`. Find workloads support `-FindLimit` and `-CursorBatchSize`. Write
 workloads support `-BatchSize` and `-MaxWritesPerSec`.
 
 Examples:
