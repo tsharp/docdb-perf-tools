@@ -68,13 +68,20 @@ Tests aggregation pipeline performance with various query patterns.
 ---
 
 ### 4. Update Workload (`--test update`)
-Tests update performance using `findOneAndUpdate` operations.
+Tests update performance using pure `updateOne` operations.
 
 **Features:**
 - 4 different update patterns (setfield, incrementcounter, etc.)
 - Non-overlapping document partitions per worker
 - Atomic increment and conditional update support
-- Returns updated documents for verification
+
+### 5. Find-And-Update Workload (`--test find_and_update`)
+Tests update performance using `findOneAndUpdate` operations.
+
+**Features:**
+- Same update patterns as `update`
+- Non-overlapping document partitions per worker
+- Returns updated documents as part of each operation
 
 **Quick Start:**
 ```bash
@@ -87,7 +94,7 @@ Tests update performance using `findOneAndUpdate` operations.
 
 ---
 
-### 5. Cursor Leak Workload (`--test leak_cursor`)
+### 6. Cursor Leak Workload (`--test leak_cursor`)
 ⚠️ Stress tests cursor leak handling by rapidly creating cursors without consuming them.
 
 **Features:**
@@ -107,7 +114,7 @@ Tests update performance using `findOneAndUpdate` operations.
 
 ---
 
-### 6. Server Info (`--test server_info`)
+### 7. Server Info (`--test server_info`)
 Prints general server metadata without running a benchmark workload.
 
 **Fields shown:**
@@ -132,7 +139,7 @@ Prints general server metadata without running a benchmark workload.
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `--mongodb-url` | (required) | MongoDB connection string |
-| `--test` | `write` | Workload type: write, read, find, update, aggregate, leak_cursor, server_info |
+| `--test` | `write` | Workload type: write, read, find, update, find_and_update, aggregate, leak_cursor, server_info |
 | `--workers` | `8` | Number of concurrent workers |
 | `--duration` | `120` | Test duration in seconds |
 | `--warmup` | `5` | Warmup period before recording |

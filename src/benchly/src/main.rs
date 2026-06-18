@@ -30,7 +30,7 @@ use cursor_leaker::cursor_leaker_task;
 use finder::finder_task;
 use reader::reader_task;
 use stats::Stats;
-use updater::{updater_task, UpdateType};
+use updater::{UpdateOperation, UpdateType, updater_task};
 use writer::{make_raw_document, writer_task};
 
 async fn create_client(args: &Args) -> Result<Client> {
@@ -98,7 +98,9 @@ async fn main() -> Result<()> {
     } else if test_type == "aggregate" {
         run_aggregate_benchmark(args).await
     } else if test_type == "update" {
-        run_update_benchmark(args).await
+        run_update_benchmark(args, UpdateOperation::UpdateOne).await
+    } else if test_type == "find_and_update" {
+        run_update_benchmark(args, UpdateOperation::FindOneAndUpdate).await
     } else if test_type == "leak_cursor" {
         run_cursor_leak_benchmark(args).await
     } else if test_type == "server_info" {
@@ -236,7 +238,16 @@ async fn run_find_benchmark(args: Args) -> Result<()> {
     let start_time_str = Utc::now().to_rfc3339();
     stats.start_recording().await;
     println!("All finders ready. Recording for {}s...\n", args.duration);
-    tokio::time::sleep(Duration::from_secs(args.duration)).await;
+    
+    // Record with periodic snapshots
+    let snapshot_start = std::time::Instant::now();
+    loop {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        stats.print_snapshot().await;
+        if snapshot_start.elapsed().as_secs() >= args.duration as u64 {
+            break;
+        }
+    }
 
     running.store(false, Ordering::Relaxed);
 
@@ -365,7 +376,16 @@ async fn run_write_benchmark(args: Args) -> Result<()> {
     let start_time_str = Utc::now().to_rfc3339();
     stats.start_recording().await;
     println!("All workers ready. Recording for {}s...\n", args.duration);
-    tokio::time::sleep(Duration::from_secs(args.duration)).await;
+    
+    // Record with periodic snapshots
+    let snapshot_start = std::time::Instant::now();
+    loop {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        stats.print_snapshot().await;
+        if snapshot_start.elapsed().as_secs() >= args.duration as u64 {
+            break;
+        }
+    }
 
     // Stop
     running.store(false, Ordering::Relaxed);
@@ -538,7 +558,16 @@ async fn run_read_benchmark(args: Args) -> Result<()> {
     let start_time_str = Utc::now().to_rfc3339();
     stats.start_recording().await;
     println!("All readers ready. Recording for {}s...\n", args.duration);
-    tokio::time::sleep(Duration::from_secs(args.duration)).await;
+    
+    // Record with periodic snapshots
+    let snapshot_start = std::time::Instant::now();
+    loop {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        stats.print_snapshot().await;
+        if snapshot_start.elapsed().as_secs() >= args.duration as u64 {
+            break;
+        }
+    }
 
     // Stop
     running.store(false, Ordering::Relaxed);
@@ -678,7 +707,16 @@ async fn run_aggregate_benchmark(args: Args) -> Result<()> {
         "All aggregators ready. Recording for {}s...\n",
         args.duration
     );
-    tokio::time::sleep(Duration::from_secs(args.duration)).await;
+    
+    // Record with periodic snapshots
+    let snapshot_start = std::time::Instant::now();
+    loop {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        stats.print_snapshot().await;
+        if snapshot_start.elapsed().as_secs() >= args.duration as u64 {
+            break;
+        }
+    }
 
     // Stop
     running.store(false, Ordering::Relaxed);
@@ -704,12 +742,21 @@ async fn run_aggregate_benchmark(args: Args) -> Result<()> {
     std::process::exit(0);
 }
 
-async fn run_update_benchmark(args: Args) -> Result<()> {
+async fn run_update_benchmark(args: Args, update_operation: UpdateOperation) -> Result<()> {
     let update_type = UpdateType::from_str(&args.update_type)
         .ok_or_else(|| anyhow::anyhow!("Invalid update type: {}. Valid types: setfield, incrementcounter, setmultiplefields, conditionalupdate", args.update_type))?;
 
+    let benchmark_name = match update_operation {
+        UpdateOperation::UpdateOne => "UPDATE BENCHMARK",
+        UpdateOperation::FindOneAndUpdate => "FIND AND UPDATE BENCHMARK",
+    };
+    let operation_name = match update_operation {
+        UpdateOperation::UpdateOne => "update_one",
+        UpdateOperation::FindOneAndUpdate => "find_one_and_update",
+    };
+
     println!("\n================================================================================");
-    println!("BENCHLY - FIND AND UPDATE BENCHMARK");
+    println!("BENCHLY - {}", benchmark_name);
     println!("================================================================================");
     println!("  Database:         {}", args.database);
     println!("  Collection:       {}", args.collection);
@@ -720,6 +767,8 @@ async fn run_update_benchmark(args: Args) -> Result<()> {
     println!("  Indexed:          {}", args.indexed);
     println!("  Preload count:    {}", args.preload_count);
     println!("  Update type:      {}", update_type.to_string());
+    println!("  Update op:        {}", operation_name);
+    println!("  Full payload:     {}", args.full_update_payload);
     println!("================================================================================\n");
 
     let client = create_client(&args).await?;
@@ -840,7 +889,11 @@ async fn run_update_benchmark(args: Args) -> Result<()> {
                 running_clone,
                 i,
                 id_batch,
+                args.doc_size,
+                args.indexed,
                 update_type_clone,
+                update_operation,
+                args.full_update_payload,
                 stop_on_fail,
                 barrier_clone,
             )
@@ -857,7 +910,16 @@ async fn run_update_benchmark(args: Args) -> Result<()> {
     let start_time_str = Utc::now().to_rfc3339();
     stats.start_recording().await;
     println!("All updaters ready. Recording for {}s...\n", args.duration);
-    tokio::time::sleep(Duration::from_secs(args.duration)).await;
+    
+    // Record with periodic snapshots
+    let snapshot_start = std::time::Instant::now();
+    loop {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        stats.print_snapshot().await;
+        if snapshot_start.elapsed().as_secs() >= args.duration as u64 {
+            break;
+        }
+    }
 
     // Stop
     running.store(false, Ordering::Relaxed);
@@ -995,7 +1057,16 @@ async fn run_cursor_leak_benchmark(args: Args) -> Result<()> {
     println!(
         "WARNING: Cursors will be created but NOT consumed - this tests cursor leak handling!\n"
     );
-    tokio::time::sleep(Duration::from_secs(args.duration)).await;
+    
+    // Record with periodic snapshots
+    let snapshot_start = std::time::Instant::now();
+    loop {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        stats.print_snapshot().await;
+        if snapshot_start.elapsed().as_secs() >= args.duration as u64 {
+            break;
+        }
+    }
 
     // Stop
     running.store(false, Ordering::Relaxed);

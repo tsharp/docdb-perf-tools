@@ -8,7 +8,7 @@ param(
 
     [string]$Database = "benchmark_db",
     [string]$Collection = "benchly_test",
-    [ValidateSet("write", "read", "find", "update", "aggregate", "leak_cursor", "server_info")]
+    [ValidateSet("write", "read", "find", "update", "find_and_update", "aggregate", "leak_cursor", "server_info")]
     [string]$Test = "write",
     [int]$Workers = 8,
     [int]$DocSize = 1024,
@@ -19,6 +19,7 @@ param(
     [int]$PreloadCount = 250000,
     [string]$AggregationType = "count",
     [string]$UpdateType = "setfield",
+    [switch]$FullUpdatePayload,
     [int]$CursorBatchSize = 101,
     [int]$FindLimit = 100,
     [string]$RunLabel = "insert_bench_1kb",
@@ -105,6 +106,10 @@ foreach ($metadataProperty in $metadataProperties) {
 
 if ($Indexed) {
   $args += "--indexed"
+}
+
+if ($FullUpdatePayload) {
+  $args += "--full-update-payload"
 }
 
 if ($SkipPreload) {

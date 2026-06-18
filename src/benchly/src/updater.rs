@@ -3,7 +3,7 @@ use hdrhistogram::Histogram;
 use mongodb::{
     Database,
     bson::{Document, doc},
-    options::{FindOneAndUpdateOptions, ReturnDocument},
+    options::ReturnDocument,
 };
 use rand::seq::SliceRandom;
 use rand::{Rng, SeedableRng, rngs::SmallRng};
@@ -26,6 +26,12 @@ pub enum UpdateType {
     SetMultipleFields,
     /// Update with conditional: {$set: {field: val}}, only if condition matches
     ConditionalUpdate,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum UpdateOperation {
+    UpdateOne,
+    FindOneAndUpdate,
 }
 
 impl UpdateType {
@@ -57,7 +63,11 @@ pub async fn updater_task(
     running: Arc<AtomicBool>,
     worker_id: usize,
     id_batch: Vec<String>,
+    doc_size: usize,
+    indexed: bool,
     update_type: UpdateType,
+    update_operation: UpdateOperation,
+    full_update_payload: bool,
     stop_on_failure: bool,
     warmup_barrier: Arc<Barrier>,
 ) -> Result<Histogram<u64>> {
@@ -65,17 +75,68 @@ pub async fn updater_task(
     let mut rng = SmallRng::seed_from_u64(worker_id as u64);
 
     let ids = id_batch.clone();
+    let payload_padding_size = if indexed {
+        doc_size.saturating_sub(100)
+    } else {
+        doc_size.saturating_sub(60)
+    };
+    let payload_template = "x".repeat(payload_padding_size);
 
     // Initial collection reference
     let collection = database.collection::<Document>(&collection_name);
 
     // Warmup: do one update to establish connection
     if let Some(id) = ids.first() {
-        let update_doc = build_update(&update_type, &mut rng, worker_id);
-        match collection
-            .find_one_and_update(doc! { "_id": id }, update_doc)
-            .await
-        {
+        let warmup_result = match update_operation {
+            UpdateOperation::UpdateOne => {
+                if full_update_payload {
+                    let replacement_doc = build_full_replacement(
+                        &update_type,
+                        &mut rng,
+                        worker_id,
+                        id,
+                        &payload_template,
+                        indexed,
+                    );
+                    collection
+                        .replace_one(doc! { "_id": id }, replacement_doc)
+                        .await
+                        .map(|_| ())
+                } else {
+                    let update_doc = build_update(&update_type, &mut rng, worker_id);
+                    collection
+                        .update_one(doc! { "_id": id }, update_doc)
+                        .await
+                        .map(|_| ())
+                }
+            }
+            UpdateOperation::FindOneAndUpdate => {
+                if full_update_payload {
+                    let replacement_doc = build_full_replacement(
+                        &update_type,
+                        &mut rng,
+                        worker_id,
+                        id,
+                        &payload_template,
+                        indexed,
+                    );
+                    collection
+                        .find_one_and_replace(doc! { "_id": id }, replacement_doc)
+                        .projection(doc! { "_id": 1 })
+                        .return_document(ReturnDocument::After)
+                        .await
+                        .map(|_| ())
+                } else {
+                    let update_doc = build_update(&update_type, &mut rng, worker_id);
+                    collection
+                        .find_one_and_update(doc! { "_id": id }, update_doc)
+                        .await
+                        .map(|_| ())
+                }
+            }
+        };
+
+        match warmup_result {
             Ok(_) => {}
             Err(e) => {
                 eprintln!("[Updater {}] warmup update failed: {}", worker_id, e);
@@ -84,30 +145,76 @@ pub async fn updater_task(
     }
     warmup_barrier.wait().await;
 
-    let mut options = FindOneAndUpdateOptions::default();
-    options.return_document = Some(ReturnDocument::After);
-
     while running.load(Ordering::Relaxed) {
         // Randomly select an ID from this worker's batch
         if let Some(id) = ids.choose(&mut rng) {
-            let update_doc = build_update(&update_type, &mut rng, worker_id);
             let start = Instant::now();
 
-            match collection
-                .find_one_and_update(doc! { "_id": id }, update_doc)
-                .with_options(options.clone())
-                .await
-            {
+            let update_result = match update_operation {
+                UpdateOperation::UpdateOne => {
+                    if full_update_payload {
+                        let replacement_doc = build_full_replacement(
+                            &update_type,
+                            &mut rng,
+                            worker_id,
+                            id,
+                            &payload_template,
+                            indexed,
+                        );
+                        collection
+                            .replace_one(doc! { "_id": id }, replacement_doc)
+                            .await
+                            .map(|_| ())
+                    } else {
+                        let update_doc = build_update(&update_type, &mut rng, worker_id);
+                        collection
+                            .update_one(doc! { "_id": id }, update_doc)
+                            .await
+                            .map(|_| ())
+                    }
+                }
+                UpdateOperation::FindOneAndUpdate => {
+                    if full_update_payload {
+                        let replacement_doc = build_full_replacement(
+                            &update_type,
+                            &mut rng,
+                            worker_id,
+                            id,
+                            &payload_template,
+                            indexed,
+                        );
+                        collection
+                            .find_one_and_replace(doc! { "_id": id }, replacement_doc)
+                            .projection(doc! { "_id": 1 })
+                            .return_document(ReturnDocument::After)
+                            .await
+                            .map(|_| ())
+                    } else {
+                        let update_doc = build_update(&update_type, &mut rng, worker_id);
+                        collection
+                            .find_one_and_update(doc! { "_id": id }, update_doc)
+                            .await
+                            .map(|_| ())
+                    }
+                }
+            };
+
+            match update_result {
                 Ok(_) => {
                     let latency_ms = start.elapsed().as_millis() as u64;
                     if stats.is_recording() {
                         let _ = local_hist.record(latency_ms);
+                        let _ = stats.snapshot_hist.lock().await.record(latency_ms);
                         stats.record_op(1);
                     }
                 }
                 Err(e) => {
                     stats.record_failure();
-                    eprintln!("[Updater {}] find_one_and_update error: {}", worker_id, e);
+                    let op_name = match update_operation {
+                        UpdateOperation::UpdateOne => "update_one",
+                        UpdateOperation::FindOneAndUpdate => "find_one_and_update",
+                    };
+                    eprintln!("[Updater {}] {} error: {}", worker_id, op_name, e);
                     if stop_on_failure {
                         running.store(false, Ordering::Relaxed);
                         return Ok(local_hist);
@@ -121,6 +228,63 @@ pub async fn updater_task(
     }
 
     Ok(local_hist)
+}
+
+fn build_full_replacement(
+    update_type: &UpdateType,
+    rng: &mut SmallRng,
+    worker_id: usize,
+    id: &str,
+    payload_template: &str,
+    indexed: bool,
+) -> Document {
+    let counter = GLOBAL_UPDATE_COUNTER.fetch_add(1, Ordering::Relaxed);
+
+    let mut replacement = doc! {
+        "_id": id,
+        "payload": payload_template
+    };
+
+    if indexed {
+        replacement.insert("indexed_field", parse_doc_counter(id));
+    }
+
+    match update_type {
+        UpdateType::SetField => {
+            replacement.insert(
+                "updated_field",
+                format!("updated_by_worker_{}_at_{}", worker_id, counter),
+            );
+            replacement.insert("update_count", counter as i64);
+        }
+        UpdateType::IncrementCounter => {
+            replacement.insert("counter", counter as i64);
+            replacement.insert("worker_updates", counter as i64);
+            replacement.insert("last_worker", worker_id as i32);
+        }
+        UpdateType::SetMultipleFields => {
+            replacement.insert("field1", format!("value_{}", counter));
+            replacement.insert("field2", rng.gen_range(1..=10000));
+            replacement.insert("field3", worker_id as i32);
+            replacement.insert("updated_at", counter as i64);
+            replacement.insert("status", "updated");
+        }
+        UpdateType::ConditionalUpdate => {
+            let new_status = if counter % 2 == 0 { "even" } else { "odd" };
+            replacement.insert("status", new_status);
+            replacement.insert("last_update", counter as i64);
+            replacement.insert("worker_id", worker_id as i32);
+            replacement.insert("version", counter as i64);
+        }
+    }
+
+    replacement
+}
+
+fn parse_doc_counter(id: &str) -> i64 {
+    id.strip_prefix("doc_")
+        .and_then(|suffix| suffix.parse::<i64>().ok())
+        .unwrap_or(0)
 }
 
 fn build_update(update_type: &UpdateType, rng: &mut SmallRng, worker_id: usize) -> Document {

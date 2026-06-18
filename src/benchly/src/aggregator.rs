@@ -99,6 +99,7 @@ pub async fn aggregator_task(
                 let latency_ms = start.elapsed().as_millis() as u64;
                 if stats.is_recording() {
                     let _ = local_hist.record(latency_ms);
+                    let _ = stats.snapshot_hist.lock().await.record(latency_ms);
                     stats.record_op(1);
                 }
             }

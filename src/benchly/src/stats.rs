@@ -6,13 +6,18 @@ use tokio::sync::Mutex;
 use crate::cli::Args;
 use crate::report::*;
 
-/// Shared counters only — no mutex in the hot path.
+/// Shared counters and histogram for periodic snapshots.
 pub struct Stats {
     op_count: AtomicU64,
     doc_count: AtomicU64,
     failures: AtomicU64,
     start_time: Mutex<Instant>,
     recording: AtomicBool,
+    /// Shared histogram for collecting samples during recording.
+    pub snapshot_hist: Mutex<Histogram<u64>>,
+    /// Previous window counts for calculating throughput
+    last_window_ops: AtomicU64,
+    last_window_docs: AtomicU64,
 }
 
 impl Stats {
@@ -23,6 +28,9 @@ impl Stats {
             failures: AtomicU64::new(0),
             start_time: Mutex::new(Instant::now()),
             recording: AtomicBool::new(false),
+            snapshot_hist: Mutex::new(Histogram::<u64>::new(3).unwrap()),
+            last_window_ops: AtomicU64::new(0),
+            last_window_docs: AtomicU64::new(0),
         }
     }
 
@@ -30,7 +38,10 @@ impl Stats {
         self.op_count.store(0, Ordering::Relaxed);
         self.doc_count.store(0, Ordering::Relaxed);
         self.failures.store(0, Ordering::Relaxed);
+        self.last_window_ops.store(0, Ordering::Relaxed);
+        self.last_window_docs.store(0, Ordering::Relaxed);
         *self.start_time.lock().await = Instant::now();
+        *self.snapshot_hist.lock().await = Histogram::<u64>::new(3).unwrap();
         self.recording.store(true, Ordering::Release);
     }
 
@@ -55,6 +66,52 @@ impl Stats {
             return;
         }
         self.failures.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get current operation and document counts.
+    pub fn get_current_counts(&self) -> (u64, u64, u64) {
+        let ops = self.op_count.load(Ordering::Relaxed);
+        let docs = self.doc_count.load(Ordering::Relaxed);
+        let fails = self.failures.load(Ordering::Relaxed);
+        (ops, docs, fails)
+    }
+
+    /// Print a snapshot of current throughput (last 5s window) and latencies.
+    pub async fn print_snapshot(&self) {
+        let elapsed = self.elapsed().await;
+        if elapsed <= 0.0 {
+            return;
+        }
+
+        let (ops, docs, _fails) = self.get_current_counts();
+        
+        // Calculate window throughput (ops/docs in last 5 seconds)
+        let last_ops = self.last_window_ops.load(Ordering::Relaxed);
+        let last_docs = self.last_window_docs.load(Ordering::Relaxed);
+        
+        let window_ops = ops.saturating_sub(last_ops);
+        let window_docs = docs.saturating_sub(last_docs);
+        
+        // Update window counters for next snapshot
+        self.last_window_ops.store(ops, Ordering::Relaxed);
+        self.last_window_docs.store(docs, Ordering::Relaxed);
+        
+        let docs_per_sec = window_docs as f64 / 5.0;
+        let ops_per_sec = window_ops as f64 / 5.0;
+
+        print!("[{:.1}s] Throughput: {:.1} docs/sec, {:.1} ops/sec", elapsed, docs_per_sec, ops_per_sec);
+
+        let mut hist_lock = self.snapshot_hist.lock().await;
+        if hist_lock.len() > 0 {
+            let p50 = hist_lock.value_at_quantile(0.50);
+            let p95 = hist_lock.value_at_quantile(0.95);
+            let p99 = hist_lock.value_at_quantile(0.99);
+            print!(" | Latency p50={} p95={} p99={} ms", p50, p95, p99);
+            
+            // Reset histogram for next window
+            *hist_lock = Histogram::<u64>::new(3).unwrap();
+        }
+        println!();
     }
 
     fn hist_to_latency_stats(hist: &Histogram<u64>) -> LatencyStats {

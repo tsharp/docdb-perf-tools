@@ -66,7 +66,7 @@ pub struct Args {
     #[arg(long, default_value = "insert_bench")]
     pub run_label: String,
 
-    /// Test type: read, find, write, update, aggregate, leak_cursor, or server_info
+    /// Test type: read, find, write, update, find_and_update, aggregate, leak_cursor, or server_info
     #[arg(long, default_value = "write")]
     pub test: String,
 
@@ -89,6 +89,10 @@ pub struct Args {
     /// Update type for update test (setfield, incrementcounter, setmultiplefields, conditionalupdate)
     #[arg(long, default_value = "setfield")]
     pub update_type: String,
+
+    /// Send full replacement payload on each update (replace_one/find_one_and_replace)
+    #[arg(long, default_value = "false")]
+    pub full_update_payload: bool,
 
     /// Cursor batch size for leak_cursor test
     #[arg(long, default_value = "101")]

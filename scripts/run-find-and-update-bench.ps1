@@ -17,7 +17,7 @@ param(
 	[int]$Warmup = 5,
 	[int]$PreloadCount = 250000,
 	[string]$UpdateType = "setfield",
-	[string]$RunLabel = "update_bench_1kb",
+	[string]$RunLabel = "find_and_update_bench_1kb",
 	[string]$OutputDir = "$PSScriptRoot/../bench-results",
 	[int]$PauseSeconds = 15,
 	[switch]$Indexed,
@@ -53,7 +53,7 @@ if ($parsedWorkers.Count -eq 0) {
 	throw "At least one worker count is required."
 }
 
-Write-Host "=== Benchly Update (update_one) Worker Sweep ===" -ForegroundColor Cyan
+Write-Host "=== Benchly Find-And-Update Worker Sweep ===" -ForegroundColor Cyan
 Write-Host "  Driver:        $Driver"
 Write-Host "  Connection:    $resolvedMongoDbUrlFile"
 Write-Host "  Database:      $Database"
@@ -71,13 +71,13 @@ Write-Host ""
 
 $runIndex = 0
 foreach ($currentWorkers in $parsedWorkers) {
-	Write-Host "--- Running update_one benchmark with $currentWorkers workers using $Driver ---" -ForegroundColor Green
+	Write-Host "--- Running find_and_update benchmark with $currentWorkers workers using $Driver ---" -ForegroundColor Green
 
 	$runnerParams = @{
 		MongoDbUrlFile = $resolvedMongoDbUrlFile
 		Database       = $Database
 		Collection     = $Collection
-		Test           = "update"
+		Test           = "find_and_update"
 		Workers        = $currentWorkers
 		DocSize        = $DocSize
 		Duration       = $Duration
@@ -123,4 +123,4 @@ foreach ($currentWorkers in $parsedWorkers) {
 }
 
 Write-Host ""
-Write-Host "=== Update (update_one) sweep complete ===" -ForegroundColor Cyan
+Write-Host "=== Find-and-update sweep complete ===" -ForegroundColor Cyan
