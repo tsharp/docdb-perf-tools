@@ -160,6 +160,7 @@ foreach ($file in $reportFiles) {
     'Cluster Type' = $clusterType
     'Users' = $users
     'Test' = $test
+    'Document Size' = Get-MetadataProperty -Json $jsonContent -Name 'doc.size'
     'Driver Language' = Get-JsonValue -Object $jsonContent -Path @('metadata', 'driver_language')
     'Driver' = Get-JsonValue -Object $jsonContent -Path @('metadata', 'driver')
     'Driver Version' = Get-JsonValue -Object $jsonContent -Path @('metadata', 'driver_version')
@@ -214,6 +215,7 @@ $columnOrder = @(
   'Cluster Type',
   'Users', 
   'Test',
+  'Document Size',
   'Driver Language',
   'Driver',
   'Driver Version',

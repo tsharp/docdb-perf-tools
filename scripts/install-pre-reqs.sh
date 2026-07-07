@@ -6,7 +6,7 @@
 sudo apt-get update
 
 # Install pre-requisite packages.
-sudo apt-get install -y wget apt-transport-https software-properties-common build-essential make
+sudo apt-get install -y wget apt-transport-https software-properties-common build-essential make iftop
 
 # Get the version of Ubuntu
 source /etc/os-release
