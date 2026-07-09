@@ -34,6 +34,12 @@ pub struct Args {
     #[arg(long, default_value = "5")]
     pub warmup: u64,
 
+    /// Cooldown time (seconds) after recording: workers keep running so the
+    /// final metric intervals are exported at full load before shutdown,
+    /// avoiding an end-of-run dip. Defaults to the warmup value.
+    #[arg(long)]
+    pub cooldown: Option<u64>,
+
     /// Document size in bytes
     #[arg(short = 's', long, default_value = "1024")]
     pub doc_size: usize,
@@ -101,6 +107,13 @@ pub struct Args {
     /// Maximum documents to consume per find operation
     #[arg(long, default_value = "100")]
     pub find_limit: i64,
+
+    /// Stream application metrics to the PerfLab API via the perflab-metrics
+    /// crate. Can also be activated with `enabled = true` in perflab.toml.
+    /// Configure the endpoint/auth with a perflab.toml file or PERFLAB_*
+    /// environment variables.
+    #[arg(long, default_value = "false")]
+    pub perflab: bool,
 }
 
 impl Args {
@@ -166,5 +179,10 @@ impl Args {
 
     pub fn should_drop_collection(&self) -> bool {
         self.drop_collection && !self.no_drop_collection
+    }
+
+    /// Cooldown seconds, defaulting to the warmup value when unset.
+    pub fn cooldown(&self) -> u64 {
+        self.cooldown.unwrap_or(self.warmup)
     }
 }

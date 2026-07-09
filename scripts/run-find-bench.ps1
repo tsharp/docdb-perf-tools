@@ -20,7 +20,7 @@ param(
 	[int]$CursorBatchSize = 101,
 	[string]$RunLabel = "find_bench_1kb",
 	[string]$OutputDir = "$PSScriptRoot/../bench-results",
-	[int]$PauseSeconds = 15,
+	[int]$PauseSeconds = 5,
 	[switch]$Indexed,
 	[switch]$SkipPreload,
 	[switch]$SkipBuild,

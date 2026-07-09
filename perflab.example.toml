@@ -1,0 +1,64 @@
+# Example pbj / perflab-metrics configuration.
+#
+# Copy to `perflab.toml` (picked up automatically from the working directory),
+# or point `PERFLAB_CONFIG` at this file:
+#
+#     PERFLAB_CONFIG=perflab.example.toml cargo run -p pbj
+#
+# Precedence is: built-in defaults -> this file -> PERFLAB_* environment vars.
+
+# --- SDK / endpoint configuration (read by perflab_metrics::RunConfig) ---
+
+# Base URL of the PerfLab API root (no trailing slash, no `/api` suffix).
+api_root = "http://localhost:3000"
+
+# Authentication mode. One of:
+#   none              no credentials (local API with auth disabled)
+#   api_key           send `api_key` below as `x-api-key`
+#   bearer            send `bearer_token` below as `Authorization: Bearer ...`
+#   managed_identity  acquire an Entra ID token from Azure Managed Identity
+# If `auth_mode` is omitted, a non-empty `api_key` is used automatically.
+# auth_mode = "api_key"
+
+# API key sent as `x-api-key`. Leave commented out when the API runs with auth
+# disabled (the local default).
+# api_key = "pk_..."
+
+# --- Managed identity (auth_mode = "managed_identity") ---
+# Works on App Service / Functions / Container Apps (via IDENTITY_ENDPOINT) and
+# on VMs/VMSS/AKS (via IMDS). No secret to ship.
+#
+# The AAD resource/audience to request a token for: the API app registration's
+# Application ID URI or client-id GUID (must match the API's AAD_AUDIENCE).
+# auth_resource = "api://<api-audience>"
+# Client id of a USER-assigned managed identity; omit for the system-assigned one.
+# auth_client_id = "00000000-0000-0000-0000-000000000000"
+
+# --- Static bearer token (auth_mode = "bearer") ---
+# bearer_token = "eyJ0eXAiOi..."
+
+# Benchmark name recorded on the run and used as the OTel service/meter name.
+benchmark_name = "pbj-demo"
+
+# Run category: "benchmark" or "experiment".
+run_type = "benchmark"
+
+# Optional human-friendly label for the run.
+# run_label = "nightly"
+
+# Reported service version (OTel `service.version`).
+service_version = "0.1.0"
+
+# How often the background reader exports accumulated metrics, in milliseconds.
+export_interval_ms = 1000
+
+# --- pbj workload configuration (read by the pbj harness) ---
+
+# Number of measurement intervals to simulate.
+intervals = 5
+
+# Base run attributes used for filtering/grouping reports. The harness can
+# append or override these at runtime before creating the run.
+[attributes]
+version = "dev"
+sku = "local"

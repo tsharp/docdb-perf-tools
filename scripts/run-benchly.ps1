@@ -19,7 +19,7 @@ param(
     [int]$PreloadCount = 250000,
     [string]$AggregationType = "count",
     [string]$UpdateType = "setfield",
-    [switch]$FullUpdatePayload,
+    [bool]$DeltaUpdatePayload = $true,
     [int]$CursorBatchSize = 101,
     [int]$FindLimit = 100,
     [string]$RunLabel = "insert_bench_1kb",
@@ -108,7 +108,7 @@ if ($Indexed) {
   $args += "--indexed"
 }
 
-if ($FullUpdatePayload) {
+if (-not $DeltaUpdatePayload) {
   $args += "--full-update-payload"
 }
 

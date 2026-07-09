@@ -85,6 +85,7 @@ pub async fn writer_task(
                     if stats.is_recording() {
                         let _ = local_hist.record(latency_ms);
                         let _ = stats.snapshot_hist.lock().await.record(latency_ms);
+                        stats.record_latency(latency_ms);
                         stats.record_op(batch_size as u64);
                     }
                 }
@@ -105,6 +106,7 @@ pub async fn writer_task(
                     if stats.is_recording() {
                         let _ = local_hist.record(latency_ms);
                         let _ = stats.snapshot_hist.lock().await.record(latency_ms);
+                        stats.record_latency(latency_ms);
                         stats.record_op(1);
                     }
                 }

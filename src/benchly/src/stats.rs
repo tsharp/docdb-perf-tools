@@ -4,6 +4,7 @@ use std::time::Instant;
 use tokio::sync::Mutex;
 
 use crate::cli::Args;
+use crate::metrics::Instruments;
 use crate::report::*;
 
 /// Shared counters and histogram for periodic snapshots.
@@ -12,12 +13,17 @@ pub struct Stats {
     doc_count: AtomicU64,
     failures: AtomicU64,
     start_time: Mutex<Instant>,
+    /// Set when recording stops so `elapsed()` reflects only the recorded
+    /// window, even if workers keep running afterwards (e.g. during cooldown).
+    stop_time: Mutex<Option<Instant>>,
     recording: AtomicBool,
     /// Shared histogram for collecting samples during recording.
     pub snapshot_hist: Mutex<Histogram<u64>>,
     /// Previous window counts for calculating throughput
     last_window_ops: AtomicU64,
     last_window_docs: AtomicU64,
+    /// PerfLab metrics instruments (no-op when reporting is disabled).
+    instruments: Instruments,
 }
 
 impl Stats {
@@ -27,10 +33,12 @@ impl Stats {
             doc_count: AtomicU64::new(0),
             failures: AtomicU64::new(0),
             start_time: Mutex::new(Instant::now()),
+            stop_time: Mutex::new(None),
             recording: AtomicBool::new(false),
             snapshot_hist: Mutex::new(Histogram::<u64>::new(3).unwrap()),
             last_window_ops: AtomicU64::new(0),
             last_window_docs: AtomicU64::new(0),
+            instruments: Instruments::from_global(),
         }
     }
 
@@ -42,7 +50,20 @@ impl Stats {
         self.last_window_docs.store(0, Ordering::Relaxed);
         *self.start_time.lock().await = Instant::now();
         *self.snapshot_hist.lock().await = Histogram::<u64>::new(3).unwrap();
+        *self.stop_time.lock().await = None;
         self.recording.store(true, Ordering::Release);
+    }
+
+    /// Stop recording: freeze the elapsed window and disable metric emission.
+    /// Workers may keep running afterwards (e.g. during cooldown) without their
+    /// operations being counted locally or exported to PerfLab.
+    pub async fn stop_recording(&self) {
+        let now = Instant::now();
+        let mut stop = self.stop_time.lock().await;
+        if stop.is_none() {
+            *stop = Some(now);
+        }
+        self.recording.store(false, Ordering::Release);
     }
 
     pub fn is_recording(&self) -> bool {
@@ -50,7 +71,9 @@ impl Stats {
     }
 
     pub async fn elapsed(&self) -> f64 {
-        self.start_time.lock().await.elapsed().as_secs_f64()
+        let start = *self.start_time.lock().await;
+        let end = self.stop_time.lock().await.unwrap_or_else(Instant::now);
+        end.saturating_duration_since(start).as_secs_f64()
     }
 
     pub fn record_op(&self, docs: u64) {
@@ -59,6 +82,7 @@ impl Stats {
         }
         self.op_count.fetch_add(1, Ordering::Relaxed);
         self.doc_count.fetch_add(docs, Ordering::Relaxed);
+        self.instruments.record_op(docs);
     }
 
     pub fn record_failure(&self) {
@@ -66,6 +90,15 @@ impl Stats {
             return;
         }
         self.failures.fetch_add(1, Ordering::Relaxed);
+        self.instruments.record_failure();
+    }
+
+    /// Record the latency of a single operation (in milliseconds).
+    pub fn record_latency(&self, latency_ms: u64) {
+        if !self.is_recording() {
+            return;
+        }
+        self.instruments.record_latency(latency_ms);
     }
 
     /// Get current operation and document counts.

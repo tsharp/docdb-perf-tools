@@ -19,9 +19,9 @@ param(
 	[string]$UpdateType = "setfield",
 	[string]$RunLabel = "update_bench_1kb",
 	[string]$OutputDir = "$PSScriptRoot/../bench-results",
-	[int]$PauseSeconds = 15,
+	[int]$PauseSeconds = 5,
 	[switch]$Indexed,
-	[switch]$FullUpdatePayload,
+	[bool]$DeltaUpdatePayload = $true,
 	[switch]$SkipPreload,
 	[switch]$SkipBuild,
 	[Parameter(ValueFromRemainingArguments = $true)]
@@ -62,7 +62,7 @@ Write-Host "  Workers:       $($parsedWorkers -join ', ')"
 Write-Host "  Doc size:      $DocSize bytes"
 Write-Host "  Preload count: $PreloadCount"
 Write-Host "  Update type:   $UpdateType"
-Write-Host "  Full payload:  $FullUpdatePayload"
+Write-Host "  Delta payload: $DeltaUpdatePayload"
 Write-Host "  Duration:      ${Duration}s"
 Write-Host "  Warmup:        ${Warmup}s"
 Write-Host "  Run label:     $RunLabel"
@@ -84,7 +84,7 @@ foreach ($currentWorkers in $parsedWorkers) {
 		Warmup         = $Warmup
 		PreloadCount   = $PreloadCount
 		UpdateType     = $UpdateType
-		FullUpdatePayload = $FullUpdatePayload
+		DeltaUpdatePayload = $DeltaUpdatePayload
 		RunLabel       = $RunLabel
 		OutputDir      = $OutputDir
 	}

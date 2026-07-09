@@ -2,6 +2,7 @@ mod aggregator;
 mod cli;
 mod cursor_leaker;
 mod finder;
+mod metrics;
 mod reader;
 mod report;
 mod stats;
@@ -49,7 +50,49 @@ async fn create_client(args: &Args) -> Result<Client> {
     tls_options.allow_invalid_certificates = Some(true);
     client_options.tls = Some(tls_options.into());
 
-    Client::with_options(client_options).context("Failed to create MongoDB client")
+    let client =
+        Client::with_options(client_options).context("Failed to create MongoDB client")?;
+
+    // Pre-flight: `Client::with_options` is lazy and does not actually connect,
+    // so ping the server up front to surface connection problems clearly before
+    // the benchmark starts doing work.
+    println!("Validating MongoDB connection...");
+    client
+        .database("admin")
+        .run_command(doc! { "ping": 1 })
+        .await
+        .context("MongoDB pre-flight connection check failed (could not ping server)")?;
+    println!("MongoDB connection OK.");
+
+    Ok(client)
+}
+
+/// Records for `duration` seconds with periodic snapshots, then stops
+/// recording so nothing is counted or exported for the `cooldown` "overlap".
+/// The workers keep running during cooldown to keep the connection and server
+/// warm while the final recorded intervals finish exporting, but their
+/// operations are no longer emitted to PerfLab.
+async fn record_window(stats: &Stats, duration: u64, cooldown: u64) {
+    let record_start = std::time::Instant::now();
+    loop {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        stats.print_snapshot().await;
+        if record_start.elapsed().as_secs() >= duration {
+            break;
+        }
+    }
+
+    // Stop recording first so the cooldown window is neither counted locally
+    // nor exported to PerfLab.
+    stats.stop_recording().await;
+
+    if cooldown > 0 {
+        println!(
+            "Cooling down for {}s (load stays on, metrics no longer emitted)...\n",
+            cooldown
+        );
+        tokio::time::sleep(Duration::from_secs(cooldown)).await;
+    }
 }
 
 async fn write_report(
@@ -200,6 +243,7 @@ async fn run_find_benchmark(args: Args) -> Result<()> {
         tokio::time::sleep(Duration::from_secs(5)).await;
     }
 
+    let metrics = metrics::MetricsSession::start(&args).await;
     let stats = Arc::new(Stats::new());
     let running = Arc::new(AtomicBool::new(true));
     let barrier = Arc::new(Barrier::new(args.workers + 1));
@@ -238,16 +282,8 @@ async fn run_find_benchmark(args: Args) -> Result<()> {
     let start_time_str = Utc::now().to_rfc3339();
     stats.start_recording().await;
     println!("All finders ready. Recording for {}s...\n", args.duration);
-    
-    // Record with periodic snapshots
-    let snapshot_start = std::time::Instant::now();
-    loop {
-        tokio::time::sleep(Duration::from_secs(5)).await;
-        stats.print_snapshot().await;
-        if snapshot_start.elapsed().as_secs() >= args.duration as u64 {
-            break;
-        }
-    }
+
+    record_window(&stats, args.duration, args.cooldown()).await;
 
     running.store(false, Ordering::Relaxed);
 
@@ -261,6 +297,8 @@ async fn run_find_benchmark(args: Args) -> Result<()> {
             Err(e) => eprintln!("Task join error: {}", e),
         }
     }
+
+    metrics.finish(None).await;
 
     stats.print_summary(&merged_hist).await;
 
@@ -330,6 +368,7 @@ async fn run_write_benchmark(args: Args) -> Result<()> {
         tokio::time::sleep(Duration::from_secs(5)).await;
     }
 
+    let metrics = metrics::MetricsSession::start(&args).await;
     let stats = Arc::new(Stats::new());
     let running = Arc::new(AtomicBool::new(true));
     // +1 for the main task which also waits on the barrier
@@ -376,16 +415,8 @@ async fn run_write_benchmark(args: Args) -> Result<()> {
     let start_time_str = Utc::now().to_rfc3339();
     stats.start_recording().await;
     println!("All workers ready. Recording for {}s...\n", args.duration);
-    
-    // Record with periodic snapshots
-    let snapshot_start = std::time::Instant::now();
-    loop {
-        tokio::time::sleep(Duration::from_secs(5)).await;
-        stats.print_snapshot().await;
-        if snapshot_start.elapsed().as_secs() >= args.duration as u64 {
-            break;
-        }
-    }
+
+    record_window(&stats, args.duration, args.cooldown()).await;
 
     // Stop
     running.store(false, Ordering::Relaxed);
@@ -401,6 +432,8 @@ async fn run_write_benchmark(args: Args) -> Result<()> {
             Err(e) => eprintln!("Task join error: {}", e),
         }
     }
+
+    metrics.finish(None).await;
 
     // Report
     stats.print_summary(&merged_hist).await;
@@ -521,6 +554,7 @@ async fn run_read_benchmark(args: Args) -> Result<()> {
         worker_id_batches.push(batch);
     }
 
+    let metrics = metrics::MetricsSession::start(&args).await;
     let stats = Arc::new(Stats::new());
     let running = Arc::new(AtomicBool::new(true));
     let barrier = Arc::new(Barrier::new(args.workers + 1));
@@ -558,16 +592,8 @@ async fn run_read_benchmark(args: Args) -> Result<()> {
     let start_time_str = Utc::now().to_rfc3339();
     stats.start_recording().await;
     println!("All readers ready. Recording for {}s...\n", args.duration);
-    
-    // Record with periodic snapshots
-    let snapshot_start = std::time::Instant::now();
-    loop {
-        tokio::time::sleep(Duration::from_secs(5)).await;
-        stats.print_snapshot().await;
-        if snapshot_start.elapsed().as_secs() >= args.duration as u64 {
-            break;
-        }
-    }
+
+    record_window(&stats, args.duration, args.cooldown()).await;
 
     // Stop
     running.store(false, Ordering::Relaxed);
@@ -583,6 +609,8 @@ async fn run_read_benchmark(args: Args) -> Result<()> {
             Err(e) => eprintln!("Task join error: {}", e),
         }
     }
+
+    metrics.finish(None).await;
 
     // Report
     stats.print_summary(&merged_hist).await;
@@ -663,6 +691,7 @@ async fn run_aggregate_benchmark(args: Args) -> Result<()> {
         tokio::time::sleep(Duration::from_secs(5)).await;
     }
 
+    let metrics = metrics::MetricsSession::start(&args).await;
     let stats = Arc::new(Stats::new());
     let running = Arc::new(AtomicBool::new(true));
     let barrier = Arc::new(Barrier::new(args.workers + 1));
@@ -707,16 +736,8 @@ async fn run_aggregate_benchmark(args: Args) -> Result<()> {
         "All aggregators ready. Recording for {}s...\n",
         args.duration
     );
-    
-    // Record with periodic snapshots
-    let snapshot_start = std::time::Instant::now();
-    loop {
-        tokio::time::sleep(Duration::from_secs(5)).await;
-        stats.print_snapshot().await;
-        if snapshot_start.elapsed().as_secs() >= args.duration as u64 {
-            break;
-        }
-    }
+
+    record_window(&stats, args.duration, args.cooldown()).await;
 
     // Stop
     running.store(false, Ordering::Relaxed);
@@ -732,6 +753,8 @@ async fn run_aggregate_benchmark(args: Args) -> Result<()> {
             Err(e) => eprintln!("Task join error: {}", e),
         }
     }
+
+    metrics.finish(None).await;
 
     // Report
     stats.print_summary(&merged_hist).await;
@@ -865,6 +888,7 @@ async fn run_update_benchmark(args: Args, update_operation: UpdateOperation) -> 
         worker_id_batches.push(batch);
     }
 
+    let metrics = metrics::MetricsSession::start(&args).await;
     let stats = Arc::new(Stats::new());
     let running = Arc::new(AtomicBool::new(true));
     let barrier = Arc::new(Barrier::new(args.workers + 1));
@@ -910,16 +934,8 @@ async fn run_update_benchmark(args: Args, update_operation: UpdateOperation) -> 
     let start_time_str = Utc::now().to_rfc3339();
     stats.start_recording().await;
     println!("All updaters ready. Recording for {}s...\n", args.duration);
-    
-    // Record with periodic snapshots
-    let snapshot_start = std::time::Instant::now();
-    loop {
-        tokio::time::sleep(Duration::from_secs(5)).await;
-        stats.print_snapshot().await;
-        if snapshot_start.elapsed().as_secs() >= args.duration as u64 {
-            break;
-        }
-    }
+
+    record_window(&stats, args.duration, args.cooldown()).await;
 
     // Stop
     running.store(false, Ordering::Relaxed);
@@ -935,6 +951,8 @@ async fn run_update_benchmark(args: Args, update_operation: UpdateOperation) -> 
             Err(e) => eprintln!("Task join error: {}", e),
         }
     }
+
+    metrics.finish(None).await;
 
     // Report
     stats.print_summary(&merged_hist).await;
@@ -1012,6 +1030,7 @@ async fn run_cursor_leak_benchmark(args: Args) -> Result<()> {
         tokio::time::sleep(Duration::from_secs(5)).await;
     }
 
+    let metrics = metrics::MetricsSession::start(&args).await;
     let stats = Arc::new(Stats::new());
     let running = Arc::new(AtomicBool::new(true));
     let barrier = Arc::new(Barrier::new(args.workers + 1));
@@ -1057,16 +1076,8 @@ async fn run_cursor_leak_benchmark(args: Args) -> Result<()> {
     println!(
         "WARNING: Cursors will be created but NOT consumed - this tests cursor leak handling!\n"
     );
-    
-    // Record with periodic snapshots
-    let snapshot_start = std::time::Instant::now();
-    loop {
-        tokio::time::sleep(Duration::from_secs(5)).await;
-        stats.print_snapshot().await;
-        if snapshot_start.elapsed().as_secs() >= args.duration as u64 {
-            break;
-        }
-    }
+
+    record_window(&stats, args.duration, args.cooldown()).await;
 
     // Stop
     running.store(false, Ordering::Relaxed);
@@ -1082,6 +1093,8 @@ async fn run_cursor_leak_benchmark(args: Args) -> Result<()> {
             Err(e) => eprintln!("Task join error: {}", e),
         }
     }
+
+    metrics.finish(None).await;
 
     // Report
     stats.print_summary(&merged_hist).await;

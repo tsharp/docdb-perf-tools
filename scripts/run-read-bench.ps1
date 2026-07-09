@@ -18,7 +18,7 @@ param(
 	[int]$PreloadCount = 250000,
 	[string]$RunLabel = "read_bench_1kb",
 	[string]$OutputDir = "$PSScriptRoot/../bench-results",
-	[int]$PauseSeconds = 15,
+	[int]$PauseSeconds = 5,
 	[switch]$Indexed,
 	[switch]$SkipPreload,
 	[switch]$SkipBuild,
