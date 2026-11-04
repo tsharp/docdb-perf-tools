@@ -6,13 +6,13 @@ pub struct LatencyStats {
     pub avg: f64,
     pub min: f64,
     pub max: f64,
-    pub p50: u64,
-    pub p75: u64,
-    pub p90: u64,
-    pub p95: u64,
-    pub p99: u64,
-    pub p999: u64,
-    pub p100: u64,
+    pub p50: f64,
+    pub p75: f64,
+    pub p90: f64,
+    pub p95: f64,
+    pub p99: f64,
+    pub p999: f64,
+    pub p100: f64,
 }
 
 #[derive(Serialize)]

@@ -56,9 +56,9 @@ impl Instruments {
         self.failures.add(1, &[]);
     }
 
-    /// Records the latency of an operation in milliseconds.
-    pub fn record_latency(&self, latency_ms: u64) {
-        self.latency.record(latency_ms as f64, &[]);
+    /// Records an operation latency measured in microseconds as fractional milliseconds.
+    pub fn record_latency(&self, latency_us: u64) {
+        self.latency.record(latency_us as f64 / 1_000.0, &[]);
     }
 }
 
@@ -230,4 +230,3 @@ fn find_config_file() -> Option<PathBuf> {
         }
     }
 }
-

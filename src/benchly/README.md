@@ -14,6 +14,8 @@ Tests write performance using `insert_one` or `insert_many` operations.
 - Rate limiting support (max writes per second)
 - Support for indexed/non-indexed documents
 - Concurrent writers with connection pooling
+- Optional client-side per-insert deadline (`--insert-timeout-ms`)
+- Optional wire-protocol execution limit for point inserts (`--insert-max-time-ms`)
 
 **Quick Start:**
 ```bash
@@ -21,6 +23,49 @@ Tests write performance using `insert_one` or `insert_many` operations.
 ```
 
 See existing PowerShell scripts for more examples.
+
+For write workloads, `--no-drop-collection` appends to the collection without
+dropping it or changing its indexes. It uses unique string IDs (`doc_` plus
+ObjectId hex) for warmup, point, and batched inserts to avoid ID collisions
+between processes/runs. Payload padding accounts for the longer IDs where the
+requested size allows. Default drop/recreate workloads and preload retain the
+sequential `doc_000000000000` ID format. With no-drop, `--indexed` adds fields
+but does not create an index.
+
+Use `--insert-timeout-ms 5000` to bound each insert call to 5 seconds, including
+server selection and pool wait. It applies to worker warmup and to the entire
+`insert_many` call when batching. Omit the option to preserve the driver's
+configured timeout behavior. Startup ping and collection/index setup are not
+covered. A timed-out call may still have been applied on the server and is not
+retried. Insert timeouts are logged and counted as measurement failures, but
+workers continue with new documents even with `--stop-on-failure`. Warmup
+timeouts are logged without aborting startup and are excluded from report counts.
+Timeouts alone do not cause a nonzero exit. With `--stop-on-failure`, other
+insert errors still stop the write run and produce a nonzero exit code after the
+report is written. Without it, all insert failures are counted and the workload
+continues. Timeout configuration is recorded in report
+metadata as `benchly.insert_timeout_ms`.
+
+Use `--insert-max-time-ms 5000` to send `maxTimeMS: 5000` in an explicit
+single-document `insert` command. This requires `--test write` and
+`--batch-size 0` or `1`. It covers worker warmup and point inserts, not setup
+commands. The pinned driver's `insert_one` options lack `maxTimeMS`, so this
+opt-in path uses `run_raw_command`, preserves configured write concern, and
+validates `writeErrors`, `writeConcernError`, and `n`. Unacknowledged writes
+(`w=0`) are rejected. Omit the option for the original driver insert path.
+
+The gateway/server must honor `maxTimeMS` to enforce the execution limit.
+This is distinct from `writeConcern.wtimeout`, which concerns acknowledgement.
+Server timeout errors are reported as failures without retrying the same
+document or stopping the run. Unsupported-option errors are not timeouts and
+still stop the run with `--stop-on-failure`. Timeout classification uses typed
+client deadlines/I/O timeouts, server codes (`50`, `89`, `262`), and write-concern
+code `64` with `errInfo.wtimeout: true`, not message text. Responses containing
+any non-timeout write error remain fatal under `--stop-on-failure`. Startup
+connection checks and collection/index setup errors remain fatal.
+Keep the optional client deadline higher than this wire limit to
+allow connection and response overhead. Metadata includes
+`benchly.insert_max_time_ms`. A timeout does not guarantee rollback.
 
 ---
 
@@ -147,7 +192,7 @@ Prints general server metadata without running a benchmark workload.
 | `--database` | `benchmark_db` | Database name |
 | `--collection` | `benchly_test` | Collection name |
 | `--drop-collection` | flag | Drop collection before test |
-| `--stop-on-failure` | flag | Stop all workers on first error |
+| `--stop-on-failure` | flag | Stop all workers on first error; insert timeouts are counted but do not stop write workloads |
 | `--output-dir` | (optional) | Directory for JSON reports |
 | `--cluster-name` | (optional) | Cluster identifier for reports |
 | `--run-label` | varies | Label for this test run |
@@ -270,7 +315,8 @@ Reports are saved to: `{output-dir}/{cluster-name}/{workers}_users/{run-label}/{
 
 ## Notes
 
-- All workloads use HDRHistogram for accurate latency measurement
+- All workloads record latency in microseconds with HDRHistogram and emit
+  fractional millisecond values in reports and PerfLab metrics
 - Connection pools are sized to match worker count
 - Retry writes/reads are disabled for accurate latency measurements
 - Workers use separate document partitions to minimize contention

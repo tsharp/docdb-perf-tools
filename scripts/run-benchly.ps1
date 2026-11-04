@@ -8,11 +8,15 @@ param(
 
     [string]$Database = "benchmark_db",
     [string]$Collection = "benchly_test",
-    [ValidateSet("write", "read", "find", "update", "find_and_update", "aggregate", "leak_cursor", "server_info")]
+    [ValidateSet("preload", "write", "read", "find", "update", "find_and_update", "aggregate", "leak_cursor", "server_info")]
     [string]$Test = "write",
     [int]$Workers = 8,
     [int]$DocSize = 1024,
     [int]$BatchSize = 0,
+    [ValidateRange(0, [int]::MaxValue)]
+    [int]$InsertTimeoutMs = 0,
+    [ValidateRange(0, [int]::MaxValue)]
+    [int]$InsertMaxTimeMs = 0,
     [int]$MaxWritesPerSec = -1,
     [int]$Duration = 120,
     [int]$Warmup = 5,
@@ -32,6 +36,10 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($InsertMaxTimeMs -gt 0 -and ($Test -ne "write" -or $BatchSize -gt 1)) {
+  throw "InsertMaxTimeMs requires Test write and BatchSize 0 or 1 (point inserts)."
+}
 
 $metadataProperties = @()
 for ($i = 0; $i -lt $RemainingArgs.Count; $i++) {
@@ -102,6 +110,13 @@ $args = @(
 
 foreach ($metadataProperty in $metadataProperties) {
   $args += @("--set", $metadataProperty)
+}
+
+if ($InsertTimeoutMs -gt 0) {
+  $args += @("--insert-timeout-ms", $InsertTimeoutMs)
+}
+if ($InsertMaxTimeMs -gt 0) {
+  $args += @("--insert-max-time-ms", $InsertMaxTimeMs)
 }
 
 if ($Indexed) {

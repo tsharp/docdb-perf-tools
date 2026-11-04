@@ -14,6 +14,10 @@ param(
 	[string[]]$Workers = @("8", "16", "24", "48", "64", "128", "256"),
 	[int]$DocSize = 1024,
 	[int]$BatchSize = 0,
+	[ValidateRange(0, [int]::MaxValue)]
+	[int]$InsertTimeoutMs = 0,
+	[ValidateRange(0, [int]::MaxValue)]
+	[int]$InsertMaxTimeMs = 0,
 	[int]$MaxWritesPerSec = -1,
 	[int]$Duration = 300,
 	[int]$Warmup = 5,
@@ -28,6 +32,10 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($InsertMaxTimeMs -gt 0 -and $BatchSize -gt 1) {
+	throw "InsertMaxTimeMs requires BatchSize 0 or 1 (point inserts)."
+}
 
 $resolvedMongoDbUrlFile = (Resolve-Path $MongoDbUrlFile).Path
 $parsedWorkers = @(
@@ -60,6 +68,8 @@ Write-Host "  Collection:      $Collection"
 Write-Host "  Workers:   	   $($parsedWorkers -join ', ')"
 Write-Host "  Doc size:        $DocSize bytes"
 Write-Host "  Batch size:      $(if ($BatchSize -gt 1) { $BatchSize } else { '1 (insertOne)' })"
+Write-Host "  Insert timeout:  $(if ($InsertTimeoutMs -gt 0) { "${InsertTimeoutMs}ms" } else { 'no explicit deadline' })"
+Write-Host "  Wire maxTimeMS:  $(if ($InsertMaxTimeMs -gt 0) { "${InsertMaxTimeMs}ms" } else { 'not set' })"
 Write-Host "  Max writes/sec:  $(if ($MaxWritesPerSec -lt 0) { 'unlimited' } else { $MaxWritesPerSec })"
 Write-Host "  Duration:        ${Duration}s"
 Write-Host "  Warmup:          ${Warmup}s"
@@ -79,6 +89,8 @@ foreach ($currentWorkers in $parsedWorkers) {
 		Workers         = $currentWorkers
 		DocSize         = $DocSize
 		BatchSize       = $BatchSize
+		InsertTimeoutMs = $InsertTimeoutMs
+		InsertMaxTimeMs = $InsertMaxTimeMs
 		MaxWritesPerSec = $MaxWritesPerSec
 		Duration        = $Duration
 		Warmup          = $Warmup

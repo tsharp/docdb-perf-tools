@@ -52,6 +52,14 @@ pub struct Args {
     #[arg(long, default_value = "0")]
     pub batch_size: usize,
 
+    /// Client-side deadline per insert (including warmup and batches), in milliseconds
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+    pub insert_timeout_ms: Option<u64>,
+
+    /// Send maxTimeMS on point-insert commands (write workload, batch size 0 or 1)
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..=i32::MAX as u64))]
+    pub insert_max_time_ms: Option<u64>,
+
     /// Drop collection before starting
     #[arg(long, default_value = "true")]
     pub drop_collection: bool,
@@ -60,7 +68,7 @@ pub struct Args {
     #[arg(long = "no-drop-collection", default_value = "false")]
     pub no_drop_collection: bool,
 
-    /// Stop all workers on first failure
+    /// Stop all workers on first failure (write workloads continue after insert timeouts)
     #[arg(long, default_value = "false")]
     pub stop_on_failure: bool,
 
@@ -72,7 +80,7 @@ pub struct Args {
     #[arg(long, default_value = "insert_bench")]
     pub run_label: String,
 
-    /// Test type: read, find, write, update, find_and_update, aggregate, leak_cursor, or server_info
+    /// Test type: preload, read, find, write, update, find_and_update, aggregate, leak_cursor, or server_info
     #[arg(long, default_value = "write")]
     pub test: String,
 
@@ -174,7 +182,30 @@ impl Args {
             properties.insert(key.to_string(), metadata_value.to_string());
         }
 
+        if let Some(timeout_ms) = self.insert_timeout_ms {
+            properties.insert(
+                "benchly.insert_timeout_ms".to_string(),
+                timeout_ms.to_string(),
+            );
+        }
+        if let Some(max_time_ms) = self.insert_max_time_ms {
+            properties.insert(
+                "benchly.insert_max_time_ms".to_string(),
+                max_time_ms.to_string(),
+            );
+        }
+
         Ok(properties)
+    }
+
+    pub fn validate_insert_max_time(&self) -> anyhow::Result<()> {
+        if self.insert_max_time_ms.is_some() {
+            anyhow::ensure!(
+                self.test.eq_ignore_ascii_case("write") && self.batch_size <= 1,
+                "--insert-max-time-ms requires --test write and --batch-size 0 or 1 (point inserts)"
+            );
+        }
+        Ok(())
     }
 
     pub fn should_drop_collection(&self) -> bool {
@@ -184,5 +215,52 @@ impl Args {
     /// Cooldown seconds, defaulting to the warmup value when unset.
     pub fn cooldown(&self) -> u64 {
         self.cooldown.unwrap_or(self.warmup)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn insert_timeout_is_optional_positive_and_reported_as_metadata() {
+        let defaults = Args::try_parse_from(["benchly"]).unwrap();
+        assert_eq!(defaults.insert_timeout_ms, None);
+        assert!(
+            !defaults
+                .parsed_metadata_properties()
+                .unwrap()
+                .contains_key("benchly.insert_timeout_ms")
+        );
+        assert!(Args::try_parse_from(["benchly", "--insert-timeout-ms", "0"]).is_err());
+        assert!(Args::try_parse_from(["benchly", "--insert-timeout-ms", "-1"]).is_err());
+        let configured = Args::try_parse_from(["benchly", "--insert-timeout-ms", "500"]).unwrap();
+        assert_eq!(configured.insert_timeout_ms, Some(500));
+        assert_eq!(
+            configured.parsed_metadata_properties().unwrap()["benchly.insert_timeout_ms"],
+            "500"
+        );
+    }
+
+    #[test]
+    fn wire_timeout_requires_positive_point_insert_configuration() {
+        let defaults = Args::try_parse_from(["benchly"]).unwrap();
+        assert_eq!(defaults.insert_max_time_ms, None);
+        for value in ["0", "-1", "2147483648"] {
+            assert!(Args::try_parse_from(["benchly", "--insert-max-time-ms", value]).is_err());
+        }
+        let mut args = Args::try_parse_from(["benchly", "--insert-max-time-ms", "5000"]).unwrap();
+        assert!(args.validate_insert_max_time().is_ok());
+        assert_eq!(
+            args.parsed_metadata_properties().unwrap()["benchly.insert_max_time_ms"],
+            "5000"
+        );
+        args.batch_size = 1;
+        assert!(args.validate_insert_max_time().is_ok());
+        args.batch_size = 2;
+        assert!(args.validate_insert_max_time().is_err());
+        args.batch_size = 0;
+        args.test = "read".to_string();
+        assert!(args.validate_insert_max_time().is_err());
     }
 }

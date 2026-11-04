@@ -96,11 +96,11 @@ pub async fn aggregator_task(
                     // Processing results
                 }
 
-                let latency_ms = start.elapsed().as_millis() as u64;
+                let latency_us = start.elapsed().as_micros() as u64;
                 if stats.is_recording() {
-                    let _ = local_hist.record(latency_ms);
-                    let _ = stats.snapshot_hist.lock().await.record(latency_ms);
-                    stats.record_latency(latency_ms);
+                    let _ = local_hist.record(latency_us);
+                    let _ = stats.snapshot_hist.lock().await.record(latency_us);
+                    stats.record_latency(latency_us);
                     stats.record_op(1);
                 }
             }

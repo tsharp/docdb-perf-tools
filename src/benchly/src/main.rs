@@ -130,11 +130,14 @@ async fn write_report(
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+    args.validate_insert_max_time()?;
     args.parsed_metadata_properties()?;
 
     let test_type = args.test.to_lowercase();
 
-    if test_type == "read" {
+    if test_type == "preload" {
+        run_preload(args).await
+    } else if test_type == "read" {
         run_read_benchmark(args).await
     } else if test_type == "find" {
         run_find_benchmark(args).await
@@ -151,6 +154,85 @@ async fn main() -> Result<()> {
     } else {
         run_write_benchmark(args).await
     }
+}
+
+async fn run_preload(args: Args) -> Result<()> {
+    println!("\n================================================================================");
+    println!("BENCHLY - DATA PRELOAD");
+    println!("================================================================================");
+    println!("  Database:         {}", args.database);
+    println!("  Collection:       {}", args.collection);
+    println!("  Document size:    {} bytes", args.doc_size);
+    println!("  Document count:   {}", args.preload_count);
+    println!("  Indexed:          {}", args.indexed);
+    println!("================================================================================\n");
+
+    let client = create_client(&args).await?;
+    let db = client.database(&args.database);
+    let collection = db.collection::<Document>(&args.collection);
+    let raw_collection = db.collection::<RawDocumentBuf>(&args.collection);
+
+    let collection_names = db
+        .list_collection_names()
+        .await
+        .context("Failed to list collections before preload")?;
+    if collection_names.contains(&args.collection) {
+        println!("Dropping existing collection...");
+        collection
+            .drop()
+            .await
+            .context("Failed to drop existing collection")?;
+    }
+
+    println!("Pre-loading {} documents...", args.preload_count);
+    let batch_size = 1000;
+    let mut loaded = 0;
+    while loaded < args.preload_count {
+        let current_batch = (args.preload_count - loaded).min(batch_size);
+        let docs: Vec<RawDocumentBuf> = (0..current_batch)
+            .map(|_| make_raw_document(args.doc_size, args.indexed))
+            .collect();
+        let doc_refs: Vec<&RawDocumentBuf> = docs.iter().collect();
+
+        raw_collection
+            .insert_many(doc_refs)
+            .await
+            .context("Failed to pre-load documents")?;
+
+        loaded += current_batch;
+        if loaded % 50000 == 0 || loaded == args.preload_count {
+            println!("  Loaded {}/{} documents...", loaded, args.preload_count);
+        }
+    }
+
+    if args.indexed {
+        println!("Creating index on indexed_field...");
+        let index = IndexModel::builder()
+            .keys(doc! { "indexed_field": 1 })
+            .build();
+        collection
+            .create_index(index)
+            .await
+            .context("Failed to create index")?;
+    }
+
+    let actual_count = collection
+        .count_documents(doc! {})
+        .await
+        .context("Failed to verify pre-loaded document count")?;
+    if actual_count != args.preload_count as u64 {
+        anyhow::bail!(
+            "Preload verification failed: expected {} documents, found {}",
+            args.preload_count,
+            actual_count
+        );
+    }
+
+    println!(
+        "Preload complete: {}.{} contains {} documents.",
+        args.database, args.collection, actual_count
+    );
+    Ok(())
 }
 
 async fn run_server_info(args: Args) -> Result<()> {
@@ -319,6 +401,12 @@ async fn run_write_benchmark(args: Args) -> Result<()> {
     println!("  Warmup:           {}s", args.warmup);
     println!("  Document size:    {} bytes", args.doc_size);
     println!("  Indexed:          {}", args.indexed);
+    if let Some(timeout_ms) = args.insert_timeout_ms {
+        println!("  Insert timeout:   {} ms (client-side)", timeout_ms);
+    }
+    if let Some(max_time_ms) = args.insert_max_time_ms {
+        println!("  Insert maxTimeMS: {} ms (sent to server)", max_time_ms);
+    }
     println!(
         "  Batch size:       {}",
         if args.batch_size > 1 {
@@ -387,6 +475,9 @@ async fn run_write_benchmark(args: Args) -> Result<()> {
         let stop_on_fail = args.stop_on_failure;
         let ds = args.doc_size;
         let indexed = args.indexed;
+        let insert_timeout = args.insert_timeout_ms.map(Duration::from_millis);
+        let insert_max_time_ms = args.insert_max_time_ms;
+        let unique_ids = !args.should_drop_collection();
 
         let handle = tokio::spawn(async move {
             writer_task(
@@ -401,6 +492,9 @@ async fn run_write_benchmark(args: Args) -> Result<()> {
                 stop_on_fail,
                 barrier_clone,
                 indexed,
+                insert_timeout,
+                insert_max_time_ms,
+                unique_ids,
             )
             .await
         });
@@ -413,23 +507,40 @@ async fn run_write_benchmark(args: Args) -> Result<()> {
 
     // Start recording — all workers are now connected and ready
     let start_time_str = Utc::now().to_rfc3339();
-    stats.start_recording().await;
-    println!("All workers ready. Recording for {}s...\n", args.duration);
-
-    record_window(&stats, args.duration, args.cooldown()).await;
+    if running.load(Ordering::Relaxed) {
+        stats.start_recording().await;
+        println!("All workers ready. Recording for {}s...\n", args.duration);
+        tokio::select! {
+            _ = record_window(&stats, args.duration, args.cooldown()) => {}
+            _ = async {
+                while running.load(Ordering::Relaxed) {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+            } => {
+                stats.stop_recording().await;
+            }
+        }
+    }
 
     // Stop
     running.store(false, Ordering::Relaxed);
 
     // Collect and merge histograms from all workers
     let mut merged_hist = Histogram::<u64>::new(3).unwrap();
+    let mut worker_error = None;
     for handle in handles {
         match handle.await {
-            Ok(Ok(hist)) => {
-                merged_hist.add(&hist).ok();
+            Ok(result) => {
+                merged_hist.add(&result.histogram).ok();
+                if let Some(e) = result.error {
+                    eprintln!("Writer error: {}", e);
+                    worker_error.get_or_insert(e);
+                }
             }
-            Ok(Err(e)) => eprintln!("Writer error: {}", e),
-            Err(e) => eprintln!("Task join error: {}", e),
+            Err(e) => {
+                eprintln!("Task join error: {}", e);
+                worker_error.get_or_insert(e.into());
+            }
         }
     }
 
@@ -441,7 +552,10 @@ async fn run_write_benchmark(args: Args) -> Result<()> {
     let end_time_str = Utc::now().to_rfc3339();
     write_report(&stats, &merged_hist, &args, &start_time_str, &end_time_str).await?;
 
-    std::process::exit(0);
+    if let Some(error) = worker_error {
+        return Err(error.context("Write benchmark failed"));
+    }
+    Ok(())
 }
 
 async fn run_read_benchmark(args: Args) -> Result<()> {

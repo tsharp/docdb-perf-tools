@@ -7,6 +7,12 @@ use crate::cli::Args;
 use crate::metrics::Instruments;
 use crate::report::*;
 
+const MICROSECONDS_PER_MILLISECOND: f64 = 1_000.0;
+
+fn micros_to_millis(microseconds: u64) -> f64 {
+    microseconds as f64 / MICROSECONDS_PER_MILLISECOND
+}
+
 /// Shared counters and histogram for periodic snapshots.
 pub struct Stats {
     op_count: AtomicU64,
@@ -93,12 +99,12 @@ impl Stats {
         self.instruments.record_failure();
     }
 
-    /// Record the latency of a single operation (in milliseconds).
-    pub fn record_latency(&self, latency_ms: u64) {
+    /// Record the latency of a single operation (in microseconds).
+    pub fn record_latency(&self, latency_us: u64) {
         if !self.is_recording() {
             return;
         }
-        self.instruments.record_latency(latency_ms);
+        self.instruments.record_latency(latency_us);
     }
 
     /// Get current operation and document counts.
@@ -117,30 +123,33 @@ impl Stats {
         }
 
         let (ops, docs, _fails) = self.get_current_counts();
-        
+
         // Calculate window throughput (ops/docs in last 5 seconds)
         let last_ops = self.last_window_ops.load(Ordering::Relaxed);
         let last_docs = self.last_window_docs.load(Ordering::Relaxed);
-        
+
         let window_ops = ops.saturating_sub(last_ops);
         let window_docs = docs.saturating_sub(last_docs);
-        
+
         // Update window counters for next snapshot
         self.last_window_ops.store(ops, Ordering::Relaxed);
         self.last_window_docs.store(docs, Ordering::Relaxed);
-        
+
         let docs_per_sec = window_docs as f64 / 5.0;
         let ops_per_sec = window_ops as f64 / 5.0;
 
-        print!("[{:.1}s] Throughput: {:.1} docs/sec, {:.1} ops/sec", elapsed, docs_per_sec, ops_per_sec);
+        print!(
+            "[{:.1}s] Throughput: {:.1} docs/sec, {:.1} ops/sec",
+            elapsed, docs_per_sec, ops_per_sec
+        );
 
         let mut hist_lock = self.snapshot_hist.lock().await;
         if hist_lock.len() > 0 {
-            let p50 = hist_lock.value_at_quantile(0.50);
-            let p95 = hist_lock.value_at_quantile(0.95);
-            let p99 = hist_lock.value_at_quantile(0.99);
-            print!(" | Latency p50={} p95={} p99={} ms", p50, p95, p99);
-            
+            let p50 = micros_to_millis(hist_lock.value_at_quantile(0.50));
+            let p95 = micros_to_millis(hist_lock.value_at_quantile(0.95));
+            let p99 = micros_to_millis(hist_lock.value_at_quantile(0.99));
+            print!(" | Latency p50={:.3} p95={:.3} p99={:.3} ms", p50, p95, p99);
+
             // Reset histogram for next window
             *hist_lock = Histogram::<u64>::new(3).unwrap();
         }
@@ -150,16 +159,16 @@ impl Stats {
     fn hist_to_latency_stats(hist: &Histogram<u64>) -> LatencyStats {
         if hist.len() > 0 {
             LatencyStats {
-                avg: hist.mean(),
-                min: hist.min() as f64,
-                max: hist.max() as f64,
-                p50: hist.value_at_quantile(0.50),
-                p75: hist.value_at_quantile(0.75),
-                p90: hist.value_at_quantile(0.90),
-                p95: hist.value_at_quantile(0.95),
-                p99: hist.value_at_quantile(0.99),
-                p999: hist.value_at_quantile(0.999),
-                p100: hist.max(),
+                avg: hist.mean() / MICROSECONDS_PER_MILLISECOND,
+                min: micros_to_millis(hist.min()),
+                max: micros_to_millis(hist.max()),
+                p50: micros_to_millis(hist.value_at_quantile(0.50)),
+                p75: micros_to_millis(hist.value_at_quantile(0.75)),
+                p90: micros_to_millis(hist.value_at_quantile(0.90)),
+                p95: micros_to_millis(hist.value_at_quantile(0.95)),
+                p99: micros_to_millis(hist.value_at_quantile(0.99)),
+                p999: micros_to_millis(hist.value_at_quantile(0.999)),
+                p100: micros_to_millis(hist.max()),
             }
         } else {
             LatencyStats::default()
@@ -223,7 +232,7 @@ impl Stats {
         println!(
             "\n================================================================================"
         );
-        println!("BENCHLY - INSERT BENCHMARK SUMMARY");
+        println!("BENCHLY - BENCHMARK SUMMARY");
         println!(
             "================================================================================"
         );
@@ -235,19 +244,57 @@ impl Stats {
         println!("  Docs/sec:         {:.1}", docs as f64 / elapsed);
 
         if hist.len() > 0 {
-            println!("\nWrite Latency:");
-            println!("  Min:              {} ms", hist.min());
-            println!("  Mean:             {:.1} ms", hist.mean());
-            println!("  P50:              {} ms", hist.value_at_quantile(0.50));
-            println!("  P75:              {} ms", hist.value_at_quantile(0.75));
-            println!("  P90:              {} ms", hist.value_at_quantile(0.90));
-            println!("  P95:              {} ms", hist.value_at_quantile(0.95));
-            println!("  P99:              {} ms", hist.value_at_quantile(0.99));
-            println!("  Max:              {} ms", hist.max());
+            println!("\nOperation Latency:");
+            println!("  Min:              {:.3} ms", micros_to_millis(hist.min()));
+            println!(
+                "  Mean:             {:.3} ms",
+                hist.mean() / MICROSECONDS_PER_MILLISECOND
+            );
+            println!(
+                "  P50:              {:.3} ms",
+                micros_to_millis(hist.value_at_quantile(0.50))
+            );
+            println!(
+                "  P75:              {:.3} ms",
+                micros_to_millis(hist.value_at_quantile(0.75))
+            );
+            println!(
+                "  P90:              {:.3} ms",
+                micros_to_millis(hist.value_at_quantile(0.90))
+            );
+            println!(
+                "  P95:              {:.3} ms",
+                micros_to_millis(hist.value_at_quantile(0.95))
+            );
+            println!(
+                "  P99:              {:.3} ms",
+                micros_to_millis(hist.value_at_quantile(0.99))
+            );
+            println!("  Max:              {:.3} ms", micros_to_millis(hist.max()));
         }
 
         println!(
             "================================================================================\n"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn latency_stats_emit_fractional_milliseconds() {
+        let mut histogram = Histogram::<u64>::new(3).unwrap();
+        histogram.record(250).unwrap();
+        histogram.record(750).unwrap();
+
+        let stats = Stats::hist_to_latency_stats(&histogram);
+        let emitted = serde_json::to_value(stats).unwrap();
+
+        assert_eq!(emitted["min"], 0.25);
+        assert_eq!(emitted["max"], 0.75);
+        assert_eq!(emitted["p100"], 0.75);
+        assert_eq!(emitted["avg"], 0.5);
     }
 }
