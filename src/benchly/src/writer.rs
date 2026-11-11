@@ -298,6 +298,44 @@ mod wire_tests;
 mod tests {
     use super::*;
 
+    #[test]
+    fn no_drop_documents_have_unique_ids_without_changing_preload_format() {
+        let mut ids = std::collections::HashSet::new();
+        for indexed in [false, true] {
+            for size in [1, 1024, 10240] {
+                let sequential = make_raw_document(size, indexed);
+                let id = sequential.get_str("_id").unwrap();
+                assert_eq!(id.len(), 16);
+                assert!(
+                    id.strip_prefix("doc_")
+                        .unwrap()
+                        .chars()
+                        .all(|c| c.is_ascii_digit())
+                );
+                for _ in 0..10 {
+                    let document = make_document(size, indexed, true);
+                    let id = document.get_str("_id").unwrap();
+                    assert_eq!(id.len(), 28);
+                    assert!(ObjectId::parse_str(id.strip_prefix("doc_").unwrap()).is_ok());
+                    assert!(ids.insert(id.to_owned()));
+                    assert!(
+                        document
+                            .get_str("payload")
+                            .unwrap()
+                            .chars()
+                            .all(|c| c == 'x')
+                    );
+                    if indexed {
+                        assert!(document.get_i64("indexed_field").is_ok());
+                    }
+                    if size >= 1024 {
+                        assert_eq!(document.as_bytes().len(), sequential.as_bytes().len());
+                    }
+                }
+            }
+        }
+    }
+
     async fn unresponsive_collection() -> (Collection<RawDocumentBuf>, tokio::net::TcpListener) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();

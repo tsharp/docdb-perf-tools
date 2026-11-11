@@ -46,7 +46,8 @@ try {
     foreach ($pair in @(
         @("--test", "write"), @("--workers", "256"), @("--duration", "45"),
         @("--collection", "benchly_point_inserts"), @("--database", "benchmark_db"),
-        @("--doc-size", "1024"), @("--batch-size", "0"), @("--insert-timeout-ms", "10000")
+        @("--doc-size", "1024"), @("--batch-size", "0"), @("--insert-timeout-ms", "5000"),
+        @("--insert-max-time-ms", "5000")
     )) {
         Assert-Option $arguments $pair[0] $pair[1]
     }
@@ -59,15 +60,33 @@ try {
     }
     Write-Host "PASS: default single inserts, separate collection, deadline, and metadata."
 
+    foreach ($noDropFlag in @("-SkipPreload", "-NoDropCollection")) {
+        Clear-Content $capture
+        $output = & pwsh -NoProfile -File $entry -SkipBuild -Workers 1,2 $noDropFlag 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "No-drop sweep failed: $output" }
+        $runs = @(Get-Content $capture | ConvertFrom-Json)
+        if ($runs.Count -ne 2) { throw "Expected two no-drop worker-count runs." }
+        foreach ($run in $runs) {
+            if ($run.arguments -notcontains "--no-drop-collection") {
+                throw "$noDropFlag was not forwarded through the wrappers."
+            }
+        }
+        if (($output -join "`n") -match "drops and recreates") {
+            throw "No-drop mode incorrectly warned that it would drop the collection."
+        }
+    }
+    Write-Host "PASS: SkipPreload and NoDropCollection preserve the collection throughout the sweep."
+
     Clear-Content $capture
     $output = & pwsh -NoProfile -File $entry -SkipBuild -Workers 2 -Duration 1 `
         -MongoDbUrlFile $secret -Database custom_db -Collection custom_inserts `
-        -DocSize 2048 -InsertTimeoutMs 250 -Indexed `
+        -DocSize 2048 -InsertTimeoutMs 250 -InsertMaxTimeMs 100 -Indexed `
         -ClusterType rust_v1_baseline -ClusterVersion custom -ClusterSize m40 `
         --set custom=value 2>&1
     if ($LASTEXITCODE -ne 0) { throw "Custom run failed: $output" }
     $arguments = (Get-Content $capture | ConvertFrom-Json).arguments
     Assert-Option $arguments "--insert-timeout-ms" 250
+    Assert-Option $arguments "--insert-max-time-ms" 100
     Assert-Option $arguments "--doc-size" 2048
     Assert-Option $arguments "--database" custom_db
     Assert-Option $arguments "--collection" custom_inserts
@@ -90,11 +109,38 @@ try {
     Write-Host "PASS: deadline forwarding throughout a batched write sweep."
 
     Clear-Content $capture
+    $output = & pwsh -NoProfile -File $writeRunner -MongoDbUrlFile $secret `
+        -Workers 1,2 -PauseSeconds 0 -SkipBuild -InsertMaxTimeMs 300 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "Wire timeout sweep failed: $output" }
+    $runs = @(Get-Content $capture | ConvertFrom-Json)
+    if ($runs.Count -ne 2) { throw "Expected two wire-timeout runs." }
+    foreach ($run in $runs) { Assert-Option $run.arguments "--insert-max-time-ms" 300 }
+    Write-Host "PASS: wire timeout forwarding throughout a point-insert sweep."
+
+    Clear-Content $capture
     $output = & pwsh -NoProfile -File $benchlyRunner -MongoDbUrlFile $secret -Test write -SkipBuild 2>&1
     if ($LASTEXITCODE -ne 0) { throw "Legacy invocation failed: $output" }
     $arguments = (Get-Content $capture | ConvertFrom-Json).arguments
-    if ($arguments -contains "--insert-timeout-ms") { throw "Existing invocations gained an explicit deadline." }
+    if ($arguments -contains "--insert-timeout-ms" -or $arguments -contains "--insert-max-time-ms") {
+        throw "Existing invocations gained an explicit deadline."
+    }
     Write-Host "PASS: omitted timeout preserves existing native arguments."
+
+    Clear-Content $capture
+    $output = & pwsh -NoProfile -File $entry -SkipBuild -InsertMaxTimeMs 0 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "Client-only mode failed: $output" }
+    $arguments = (Get-Content $capture | ConvertFrom-Json).arguments
+    if ($arguments -contains "--insert-max-time-ms") { throw "Wire timeout was not disabled." }
+    Assert-Option $arguments "--insert-timeout-ms" 5000
+    Write-Host "PASS: explicit opt-out retains the client-only deadline."
+
+    $output = & pwsh -NoProfile -File $writeRunner -MongoDbUrlFile $secret `
+        -SkipBuild -BatchSize 2 -InsertMaxTimeMs 100 2>&1
+    if ($LASTEXITCODE -eq 0) { throw "Wire timeout unexpectedly accepted batched inserts." }
+    $output = & pwsh -NoProfile -File $benchlyRunner -MongoDbUrlFile $secret `
+        -SkipBuild -Test read -InsertMaxTimeMs 100 2>&1
+    if ($LASTEXITCODE -eq 0) { throw "Wire insert timeout unexpectedly accepted read workload." }
+    Write-Host "PASS: unsupported wire timeout combinations fail explicitly."
 
     $env:BENCHLY_INSERT_TEST_EXIT = "7"
     $output = & pwsh -NoProfile -File $entry -SkipBuild 2>&1

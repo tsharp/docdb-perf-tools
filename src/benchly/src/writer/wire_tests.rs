@@ -389,3 +389,56 @@ async fn unacknowledged_writes_are_rejected_before_sending_insert() {
     assert!(error.to_string().contains("acknowledged writes"));
     assert!(server.inserts.try_recv().is_err());
 }
+
+#[tokio::test]
+async fn no_drop_writers_send_unique_ids_in_warmup_and_subsequent_runs() {
+    let mut server = WireServer::start(doc! { "ok": 1.0, "n": 1 }).await;
+    let mut ids = std::collections::HashSet::new();
+    for _ in 0..2 {
+        let running = Arc::new(AtomicBool::new(true));
+        let barrier = Arc::new(Barrier::new(2));
+        let handle = tokio::spawn(writer_task(
+            server.collection("").await,
+            Arc::new(Stats::new()),
+            running.clone(),
+            0,
+            1024,
+            0,
+            -1,
+            1,
+            true,
+            barrier.clone(),
+            false,
+            Some(Duration::from_secs(2)),
+            Some(100),
+            true,
+        ));
+        tokio::time::timeout(Duration::from_secs(2), barrier.wait())
+            .await
+            .expect("no-drop warmup failed");
+        for _ in 0..3 {
+            let command = server.next_insert().await;
+            let documents = command.get_array("documents").unwrap();
+            let document = documents[0].as_document().unwrap();
+            let id = document.get_str("_id").unwrap();
+            assert_eq!(id.len(), 28);
+            assert!(ObjectId::parse_str(id.strip_prefix("doc_").unwrap()).is_ok());
+            assert!(ids.insert(id.to_owned()), "duplicate ID across write runs");
+        }
+        running.store(false, Ordering::Relaxed);
+        let result = tokio::time::timeout(Duration::from_secs(2), handle)
+            .await
+            .expect("no-drop writer did not stop")
+            .unwrap();
+        assert!(result.error.is_none());
+        while let Ok(command) = server.inserts.try_recv() {
+            let id = command.get_array("documents").unwrap()[0]
+                .as_document()
+                .unwrap()
+                .get_str("_id")
+                .unwrap()
+                .to_owned();
+            assert!(ids.insert(id));
+        }
+    }
+}
